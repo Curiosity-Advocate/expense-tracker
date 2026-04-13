@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Expense Tracker — C4 Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; color: #2c2c2a; padding: 28px 32px; }
+  h1  { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #5f5e5a; margin-bottom: 22px; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tab  { padding: 6px 18px; border-radius: 6px; border: 1px solid #c4c2b8; background: transparent; color: #5f5e5a; cursor: pointer; font-size: 13px; font-family: inherit; transition: background .15s; }
+  .tab:hover { background: #eae8e0; }
+  .tab.on { background: #fff; color: #2c2c2a; border-color: #888780; font-weight: 500; }
+
+  /* panels */
+  .panel { display: none; }
+  .panel.on { display: block; }
+
+  /* diagram canvas */
+  .canvas { background: #fff; border: 1px solid #d3d1c7; border-radius: 10px; padding: 32px; position: relative; overflow-x: auto; }
+
+  /* boxes */
+  .box { border-radius: 8px; padding: 10px 16px; position: absolute; text-align: center; }
+  .box .name { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .box .desc { font-size: 12px; }
+
+  /* colours */
+  .purple { background: #EEEDFE; border: 1px solid #7F77DD; }
+  .purple .name { color: #26215C; }
+  .purple .desc { color: #534AB7; }
+
+  .teal   { background: #E1F5EE; border: 1px solid #1D9E75; }
+  .teal .name { color: #04342C; }
+  .teal .desc { color: #0F6E56; }
+
+  .gray   { background: #F1EFE8; border: 1px solid #888780; }
+  .gray .name { color: #2C2C2A; }
+  .gray .desc { color: #5F5E5A; }
+
+  .blue   { background: #E6F1FB; border: 1px solid #378ADD; }
+  .blue .name { color: #042C53; }
+  .blue .desc { color: #185FA5; }
+
+  .coral  { background: #FAECE7; border: 1px solid #D85A30; }
+  .coral .name { color: #4A1B0C; }
+  .coral .desc { color: #993C1D; }
+
+  /* divider inside the DB box */
+  .divider { border-top: 1px solid #c4ddf4; margin: 8px -16px; }
+  .db-section .name { font-size: 13px; font-weight: 500; color: #042C53; margin-bottom: 2px; }
+  .db-section .desc { font-size: 11px; color: #185FA5; }
+
+  /* svg connector overlay */
+  .svg-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+
+  /* legend */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #5f5e5a; margin-top: 14px; align-items: center; }
+  .legend span { display: flex; align-items: center; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+  .dash-line { width: 22px; border-top: 1.5px dashed #888780; }
+
+  /* level label */
+  .level-label { font-size: 11px; font-weight: 500; color: #888780; letter-spacing: .05em; text-transform: uppercase; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Expense Tracker — C4 Architecture</h1>
+<p class="sub">Four levels of detail. Each box represents a distinct boundary with its own responsibilities.</p>
+
+<div class="tabs">
+  <button class="tab on"  onclick="show(this,'l1')">L1 — System context</button>
+  <button class="tab"     onclick="show(this,'l2')">L2 — Containers</button>
+  <button class="tab"     onclick="show(this,'l3a')">L3 — API process</button>
+  <button class="tab"     onclick="show(this,'l3b')">L3 — Worker process</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     L1 — SYSTEM CONTEXT
+     Who uses the system and what external systems does it touch?
+══════════════════════════════════════════════════════════ -->
+<div id="l1" class="panel on">
+<p class="level-label">L1 — System context</p>
+<div class="canvas" style="height:380px; min-width:640px;">
+  <svg class="svg-overlay" width="100%" height="100%">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <!-- User → system -->
+    <line x1="340" y1="88" x2="340" y2="148" stroke="#888780" stroke-width="1" marker-end="url(#a)"/>
+    <!-- system → Basiq -->
+    <path d="M235,228 L235,290 L108,290 L108,310" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#a)"/>
+    <!-- system → Bitwarden -->
+    <line x1="290" y1="228" x2="290" y2="310" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#a)"/>
+    <!-- system → LLM -->
+    <line x1="430" y1="228" x2="430" y2="310" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#a)"/>
+    <!-- system → FCM -->
+    <path d="M485,228 L485,290 L582,290 L582,310" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#a)"/>
+  </svg>
+  <!-- Person -->
+  <div class="box gray" style="width:200px;top:20px;left:240px;">
+    <div class="name">User</div>
+    <div class="desc">Java desktop client</div>
+  </div>
+  <!-- Our system -->
+  <div class="box purple" style="width:360px;top:148px;left:160px;">
+    <div class="name">Expense Tracker</div>
+    <div class="desc">Spring Boot API + async worker · Java · PostgreSQL</div>
+  </div>
+  <!-- External systems -->
+  <div class="box teal" style="width:152px;top:310px;left:32px;">
+    <div class="name">Basiq CDR</div>
+    <div class="desc">Australian open banking</div>
+  </div>
+  <div class="box teal" style="width:152px;top:310px;left:214px;">
+    <div class="name">Bitwarden</div>
+    <div class="desc">OAuth token storage</div>
+  </div>
+  <div class="box teal" style="width:152px;top:310px;left:354px;">
+    <div class="name">LLM API</div>
+    <div class="desc">AI categorisation</div>
+  </div>
+  <div class="box coral" style="width:152px;top:310px;left:506px;">
+    <div class="name">FCM · v2</div>
+    <div class="desc">Push notifications</div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     L2 — CONTAINERS
+     What deployable units exist and how do they communicate?
+══════════════════════════════════════════════════════════ -->
+<div id="l2" class="panel">
+<p class="level-label">L2 — Containers</p>
+<div class="canvas" style="height:490px; min-width:700px;">
+  <svg class="svg-overlay" width="100%" height="100%">
+    <defs><marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <!-- Desktop → API process -->
+    <path d="M350,76 L350,104 L130,104 L130,132" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+    <text x="244" y="98" font-size="11" fill="#888780" text-anchor="middle" font-family="inherit">HTTPS</text>
+    <!-- API → DB (writes) -->
+    <line x1="228" y1="178" x2="264" y2="178" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+    <!-- API → Worker (job queue) -->
+    <line x1="130" y1="210" x2="130" y2="338" stroke="#888780" stroke-width="1" stroke-dasharray="5 3" marker-end="url(#b)"/>
+    <text x="146" y="278" font-size="11" fill="#888780" font-family="inherit">job queue</text>
+    <!-- Worker → DB (reads/writes) -->
+    <path d="M228,372 L246,372 L246,250 L264,250" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+    <!-- Worker → Basiq -->
+    <path d="M228,380 L480,380 L480,154 L504,154" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+    <!-- Worker → Bitwarden -->
+    <path d="M228,390 L484,390 L484,234 L504,234" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+    <!-- Worker → LLM -->
+    <path d="M228,400 L488,400 L488,394 L504,394" fill="none" stroke="#888780" stroke-width="1" marker-end="url(#b)"/>
+  </svg>
+
+  <div class="box gray" style="width:220px;top:20px;left:240px;">
+    <div class="name">Desktop app</div>
+    <div class="desc">Java client · HTTPS · SQLite drafts</div>
+  </div>
+  <div class="box purple" style="width:210px;top:132px;left:24px;">
+    <div class="name">API process</div>
+    <div class="desc">Spring Boot REST · 8 modules · port 8080</div>
+  </div>
+  <!-- PostgreSQL with internal sections -->
+  <div class="box blue" style="width:222px;top:132px;left:264px;padding-bottom:14px;">
+    <div class="name">PostgreSQL</div>
+    <div class="divider"></div>
+    <div class="db-section">
+      <div class="name">Primary</div>
+      <div class="desc">Strong consistency · ACID writes</div>
+    </div>
+    <div class="divider"></div>
+    <div class="db-section">
+      <div class="name">Read replica</div>
+      <div class="desc">Max 60s bounded staleness</div>
+    </div>
+    <div class="divider"></div>
+    <div class="db-section">
+      <div class="name">Materialized views</div>
+      <div class="desc">AOP @RefreshMaterializedViews</div>
+    </div>
+  </div>
+  <div class="box purple" style="width:210px;top:338px;left:24px;">
+    <div class="name">Worker process</div>
+    <div class="desc">Spring Boot · async job processor</div>
+  </div>
+  <div class="box teal" style="width:185px;top:132px;left:504px;">
+    <div class="name">Basiq CDR</div>
+    <div class="desc">Open banking data</div>
+  </div>
+  <div class="box teal" style="width:185px;top:212px;left:504px;">
+    <div class="name">Bitwarden</div>
+    <div class="desc">OAuth token retrieval at runtime</div>
+  </div>
+  <div class="box teal" style="width:185px;top:372px;left:504px;">
+    <div class="name">LLM API</div>
+    <div class="desc">AI categorisation calls</div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     L3a — API PROCESS INTERNALS
+     What modules live inside the API process?
+══════════════════════════════════════════════════════════ -->
+<div id="l3a" class="panel">
+<p class="level-label">L3 — API process internals</p>
+<div class="canvas" style="height:420px; min-width:660px;">
+  <svg class="svg-overlay" width="100%" height="100%">
+    <defs><marker id="c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <!-- Gateway → Auth -->
+    <line x1="180" y1="80" x2="180" y2="100" stroke="#888780" stroke-width="1" marker-end="url(#c)"/>
+    <!-- Gateway → User mgmt -->
+    <line x1="510" y1="80" x2="510" y2="100" stroke="#888780" stroke-width="1" marker-end="url(#c)"/>
+    <!-- Gateway → Expense -->
+    <line x1="180" y1="80" x2="180" y2="180" stroke="#888780" stroke-width="1" stroke-dasharray="1 0" marker-end="url(#c)"/>
+    <!-- Gateway → Target -->
+    <line x1="510" y1="80" x2="510" y2="180" stroke="#888780" stroke-width="1" marker-end="url(#c)"/>
+    <!-- Gateway → Bank -->
+    <line x1="180" y1="80" x2="180" y2="260" stroke="#888780" stroke-width="1" marker-end="url(#c)"/>
+    <!-- Gateway → AI -->
+    <line x1="510" y1="80" x2="510" y2="260" stroke="#888780" stroke-width="1" marker-end="url(#c)"/>
+    <!-- Target depends on Expense via interface -->
+    <line x1="380" y1="210" x2="320" y2="210" stroke="#888780" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#c)"/>
+    <text x="350" y="204" font-size="10" fill="#888780" text-anchor="middle" font-family="inherit">ExpenseService</text>
+    <!-- Bank Integration calls Expense -->
+    <line x1="180" y1="260" x2="180" y2="236" stroke="#888780" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#c)"/>
+    <!-- AI calls Expense -->
+    <path d="M380,290 L350,290 L350,210 L320,210" fill="none" stroke="#888780" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#c)"/>
+  </svg>
+
+  <!-- Gateway - spans full width -->
+  <div class="box gray" style="width:612px;top:20px;left:24px;">
+    <div class="name">API gateway filter</div>
+    <div class="desc">JWT validation · RLS user context · Bucket4j rate limiting · traceId injection · routes to all modules</div>
+  </div>
+  <!-- Row 1 -->
+  <div class="box purple" style="width:288px;top:100px;left:24px;">
+    <div class="name">Auth module</div>
+    <div class="desc">BCrypt · JWT issuance · login lockout · sudo tokens for step-up auth</div>
+  </div>
+  <div class="box purple" style="width:288px;top:100px;left:348px;">
+    <div class="name">User management module</div>
+    <div class="desc">Profiles · bulk access grants · discoverability flag</div>
+  </div>
+  <!-- Row 2 -->
+  <div class="box purple" style="width:288px;top:180px;left:24px;">
+    <div class="name">Expense module</div>
+    <div class="desc">CRUD · RLS enforcement · AOP @RefreshMaterializedViews</div>
+  </div>
+  <div class="box purple" style="width:288px;top:180px;left:348px;">
+    <div class="name">Target and prediction module</div>
+    <div class="desc">Targets · Strategy pattern · versioned PredictionContext · canHandle fallback</div>
+  </div>
+  <!-- Row 3 -->
+  <div class="box purple" style="width:288px;top:260px;left:24px;">
+    <div class="name">Bank integration module</div>
+    <div class="desc">OAuth consent flow · sync trigger · Bucket4j rate limit · duplicate detection</div>
+  </div>
+  <div class="box purple" style="width:288px;top:260px;left:348px;">
+    <div class="name">AI categorisation module</div>
+    <div class="desc">Suggestions API · optimistic lock on original category field</div>
+  </div>
+  <!-- Observability - spans full width -->
+  <div class="box gray" style="width:612px;top:350px;left:24px;">
+    <div class="name">Observability and dead letter module</div>
+    <div class="desc">Structured logs · dead letter table · manual retry endpoint · all modules write here, nothing reads back</div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     L3b — WORKER PROCESS INTERNALS
+     What workers live inside the async process?
+══════════════════════════════════════════════════════════ -->
+<div id="l3b" class="panel">
+<p class="level-label">L3 — Worker process internals</p>
+<div class="canvas" style="height:380px; min-width:660px;">
+  <svg class="svg-overlay" width="100%" height="100%">
+    <defs><marker id="d" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <!-- Queue → Bank sync -->
+    <line x1="180" y1="80" x2="180" y2="100" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <!-- Queue → Normalisation -->
+    <line x1="490" y1="80" x2="490" y2="100" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <!-- Queue → AI worker -->
+    <line x1="180" y1="80" x2="180" y2="180" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <!-- Queue → Archival -->
+    <line x1="490" y1="80" x2="490" y2="180" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <!-- Queue → Dead letter -->
+    <line x1="180" y1="80" x2="180" y2="260" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <!-- Bank sync → Normalisation (outbox) -->
+    <line x1="324" y1="130" x2="356" y2="130" stroke="#888780" stroke-width="1" marker-end="url(#d)"/>
+    <text x="340" y="124" font-size="10" fill="#888780" text-anchor="middle" font-family="inherit">outbox</text>
+  </svg>
+
+  <!-- Job queue consumer - full width -->
+  <div class="box gray" style="width:612px;top:20px;left:24px;">
+    <div class="name">Job queue consumer</div>
+    <div class="desc">SELECT … FOR UPDATE SKIP LOCKED · dispatches all job types · DB table V1 → Redis Streams V2</div>
+  </div>
+  <!-- Row 1 -->
+  <div class="box purple" style="width:288px;top:100px;left:24px;">
+    <div class="name">Bank sync worker</div>
+    <div class="desc">Basiq CDR calls · hash chain append · Bitwarden token retrieval</div>
+  </div>
+  <div class="box purple" style="width:288px;top:100px;left:348px;">
+    <div class="name">Normalisation worker</div>
+    <div class="desc">Outbox pattern · calls ExpenseService interface · duplicate detection</div>
+  </div>
+  <!-- Row 2 -->
+  <div class="box purple" style="width:288px;top:180px;left:24px;">
+    <div class="name">AI categorisation worker</div>
+    <div class="desc">Polls uncategorised expenses · LLM API calls · writes suggestions table</div>
+  </div>
+  <div class="box purple" style="width:288px;top:180px;left:348px;">
+    <div class="name">Archival worker</div>
+    <div class="desc">Dynamic 5-year threshold · year partition creation · partition registry update</div>
+  </div>
+  <!-- Row 3 -->
+  <div class="box gray" style="width:288px;top:260px;left:24px;">
+    <div class="name">Dead letter handler</div>
+    <div class="desc">Exponential backoff · 3 cycles · 24h gap · writes dead_letter_jobs</div>
+  </div>
+  <div class="box coral" style="width:288px;top:260px;left:348px;">
+    <div class="name">Notification observer · v2</div>
+    <div class="desc">V1 polling endpoint · V2 Observer pattern → FCM push</div>
+  </div>
+</div>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <span><span class="dot" style="background:#7F77DD;"></span>Our components</span>
+  <span><span class="dot" style="background:#888780;"></span>Gateway / scheduler</span>
+  <span><span class="dot" style="background:#1D9E75;"></span>External system</span>
+  <span><span class="dot" style="background:#378ADD;"></span>Data store</span>
+  <span><span class="dot" style="background:#D85A30;"></span>V2 future feature</span>
+  <span><span class="dash-line"></span>calls via service interface</span>
+</div>
+
+<script>
+function show(btn, id) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById(id).classList.add('on');
+}
+</script>
+</body>
+</html>
