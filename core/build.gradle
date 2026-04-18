@@ -1,0 +1,9 @@
+// No Spring Boot plugin here — core is a plain Java library
+// It has NO main class, NO Spring Boot starter-web, nothing infrastructure-specific
+dependencies {
+    // Only essential, non-framework libraries go here
+    implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
+
+    // Testing tools (Pure JUnit/AssertJ)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

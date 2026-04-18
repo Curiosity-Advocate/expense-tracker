@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: expense-tracker-api
+  
+  # Step 3: Database configuration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/expense_db
+    username: postgres
+    # This is a dummy value. Refactor this
+    password: yourpassword
+    driver-class-name: org.postgresql.Driver
+
+  # Step 3: Flyway settings
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+# Step 2: Swagger/OpenAPI path customization (optional)
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
