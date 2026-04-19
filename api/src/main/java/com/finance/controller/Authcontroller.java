@@ -65,4 +65,15 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("data", response));
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            @RequestHeader("Authorization") String authorizationHeader) {
+ 
+        // Header format is "Bearer <token>" — strip the prefix before passing to service.
+        String token = authorizationHeader.replace("Bearer ", "");
+        authService.logout(token);
+ 
+        // 204 No Content — logout has no meaningful body to return.
+        return ResponseEntity.noContent().build();
+    }
 }

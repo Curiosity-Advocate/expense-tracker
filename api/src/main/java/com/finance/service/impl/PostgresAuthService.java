@@ -89,6 +89,31 @@ public class PostgresAuthService implements AuthService {
                 "Bearer"
         );
     }
+
+    @Override
+    @Transactional
+    public void logout(String token) {
+        // Parse the token to extract jti and expiry.
+        // If the token is already expired or malformed, JwtService throws JwtException —
+        // the gateway filter will have already rejected those before reaching here,
+        // but we let the exception propagate if somehow it slips through.
+        String  jti      = jwtService.getJti(token);
+        Instant expiresAt = jwtService.getExpiry(token);
+ 
+        // Idempotent — if the token is already revoked, do nothing.
+        // This handles the case where the client calls logout twice (e.g. retry on network failure).
+        if (revokedTokenRepository.existsByTokenJti(jti)) {
+            return;
+        }
+ 
+        RevokedTokenEntity revoked = new RevokedTokenEntity();
+        revoked.setUserId(jwtService.getUserId(token));
+        revoked.setTokenJti(jti);
+        revoked.setRevokedAt(Instant.now(clock));
+        revoked.setExpiresAt(expiresAt);
+ 
+        revokedTokenRepository.save(revoked);
+    }
   
     private boolean isLocked(UserEntity user) {
         return user.getLockedUntil() != null

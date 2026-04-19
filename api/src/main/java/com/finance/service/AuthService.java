@@ -9,4 +9,8 @@ import com.finance.domain.RegisteredUser;
 public interface AuthService {
     RegisteredUser register(RegisterCommand command);
     TokenPair login(LoginCommand command);
+
+    // token is the raw JWT string from the Authorization header.
+    // void return — 204 No Content, nothing to return to the caller.
+    void logout(String token);
 }
