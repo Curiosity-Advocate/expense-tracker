@@ -46,4 +46,23 @@ public class AuthController {
         // Wrapped in "data" envelope per api_design.md contract
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", response));
     }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
+        LoginCommand command = new LoginCommand(
+                request.username(),
+                request.password()
+        );
+ 
+        TokenPair result = authService.login(command);
+ 
+        LoginResponse response = new LoginResponse(
+                result.accessToken(),
+                result.expiresAt(),
+                result.tokenType()
+        );
+ 
+        return ResponseEntity.ok(Map.of("data", response));
+    }
+
 }

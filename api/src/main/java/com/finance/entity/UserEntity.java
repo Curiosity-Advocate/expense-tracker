@@ -1,6 +1,8 @@
 package com.finance.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Generated;
+import org.hibernate.annotations.GenerationTime;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -58,7 +60,6 @@ public class UserEntity {
     @PrePersist
     private void onCreate() {
         this.id = UUID.randomUUID();
-        this.createdAt = Instant.now();
         this.emailVerified = true; // V1: programmatic verification, see TODO above
     }
 

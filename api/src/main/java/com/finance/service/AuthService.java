@@ -8,4 +8,5 @@ import com.finance.domain.RegisteredUser;
 // We do not pre-emptively define methods we have not built yet.
 public interface AuthService {
     RegisteredUser register(RegisterCommand command);
+    TokenPair login(LoginCommand command);
 }

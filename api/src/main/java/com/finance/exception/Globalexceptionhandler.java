@@ -25,6 +25,17 @@ public class GlobalExceptionHandler {
                 .body(errorEnvelope("USER_ALREADY_EXISTS", "Username or email already in use"));
     }
 
+    // 423 Locked — more precise than 401 for a lockout scenario.
+    // lockedUntil tells the client exactly when to retry — prevents hammering the endpoint.
+    @ExceptionHandler(AccountLockedException.class)
+    public ResponseEntity<?> handleAccountLocked(AccountLockedException ex) {
+        return ResponseEntity
+                .status(HttpStatus.LOCKED)
+                .body(errorEnvelope("ACCOUNT_LOCKED",
+                        "Account temporarily locked. Try again after " + ex.getLockedUntil()));
+    }
+
+
     private Map<String, Object> errorEnvelope(String code, String message) {
         // create immutable map
         return Map.of("error", Map.of(

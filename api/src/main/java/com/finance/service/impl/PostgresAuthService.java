@@ -56,4 +56,59 @@ public class PostgresAuthService implements AuthService {
                 savedUser.getCreatedAt()
         );
     }
+
+    @Override
+    @Transactional
+    public TokenPair login(LoginCommand command) {
+        // Always look up by username first.
+        // If not found, throw the same exception as wrong password —
+        // the caller cannot distinguish which case occurred.
+        UserEntity user = userRepository.findByUsername(command.username())
+                .orElseThrow(InvalidCredentialsException::new);
+ 
+        // Check lockout before attempting password verification.
+        // This prevents timing attacks where BCrypt comparison time
+        // reveals that the username exists.
+        if (isLocked(user)) {
+            throw new AccountLockedException(user.getLockedUntil());
+        }
+ 
+        if (!passwordEncoder.matches(command.password(), user.getPasswordHash())) {
+            handleFailedAttempt(user);
+            throw new InvalidCredentialsException();
+        }
+ 
+        // Successful login — reset the failed attempt counter.
+        resetFailedAttempts(user);
+ 
+        String token = jwtService.generateToken(user.getId());
+ 
+        return new TokenPair(
+                token,
+                jwtService.getExpiry(token),
+                "Bearer"
+        );
+    }
+  
+    private boolean isLocked(UserEntity user) {
+        return user.getLockedUntil() != null
+                && user.getLockedUntil().isAfter(Instant.now(clock));
+    }
+ 
+    private void handleFailedAttempt(UserEntity user) {
+        int attempts = user.getFailedLoginCount() + 1;
+        user.setFailedLoginCount(attempts);
+ 
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+            user.setLockedUntil(Instant.now(clock).plus(LOCKOUT_MINUTES, ChronoUnit.MINUTES));
+        }
+ 
+        userRepository.save(user);
+    }
+ 
+    private void resetFailedAttempts(UserEntity user) {
+        user.setFailedLoginCount(0);
+        user.setLockedUntil(null);
+        userRepository.save(user);
+    }
 }

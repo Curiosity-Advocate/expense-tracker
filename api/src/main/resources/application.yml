@@ -20,6 +20,11 @@ jpa:
     enabled: true
     baseline-on-migrate: true
 
+app:
+  jwt:
+    secret: ${JWT_SECRET}          # must be set as environment variable — never hardcoded
+    expiry-days: 7                 # V1: long-lived tokens. Step-up auth handles sensitive actions.
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
