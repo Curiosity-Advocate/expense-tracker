@@ -130,6 +130,11 @@ Core tables: `users`, `revoked_tokens`, `sudo_tokens`, `user_profiles`, `access_
 - RLS enabled on all tenant-scoped tables
 - `mv_monthly_expense_summary` and `mv_merchant_summary` join on `partition_registry` to exclude archived partitions automatically
 
+**Timestamp ownership (decided during implementation):**
+- `created_at` — immutable after insert. Enforced by two independent layers: `updatable = false` in Hibernate (application layer) and `trg_users_lock_created_at` DB trigger (database layer). A bug in either layer does not compromise the other.
+- `updated_at` — fully DB-owned. `insertable = false, updatable = false` in Hibernate means Java never touches it. `trg_users_set_updated_at` fires on every UPDATE. Accurate even if someone bypasses the application and runs SQL directly.
+- `revoked_at` in `revoked_tokens` — no DEFAULT. Application must set it explicitly. Preserves the audit relationship: `revoked_at < expires_at` means normal early logout; `revoked_at > expires_at` means delayed async revocation. A DEFAULT NOW() would collapse both cases and hide the distinction. `chk_revoked_at_not_future` constraint prevents nonsensical future values, with a 5-second buffer for clock skew.
+
 ---
 
 Ready to move to the C4 diagram now.

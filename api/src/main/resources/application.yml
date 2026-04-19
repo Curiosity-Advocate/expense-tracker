@@ -14,6 +14,7 @@ jpa:
   properties:
     hibernate:
       format_sql: true
+      ddl-auto: validate # Validate the java representation of DB tables don't drift at run time
 
   flyway:
     enabled: true

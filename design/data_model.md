@@ -1,4 +1,4 @@
-## Data Model
+# Data Model
 
 A few conventions that apply to every table before we start:
 
@@ -7,6 +7,15 @@ A few conventions that apply to every table before we start:
 - All timestamps are `TIMESTAMPTZ` (timezone-aware). Your server stores everything in UTC. Display conversion is the client's responsibility.
 - Every table has `created_at TIMESTAMPTZ DEFAULT NOW()`. Most have `updated_at` maintained by a trigger.
 - Soft deletes use `deleted_at TIMESTAMPTZ NULL`. A null value means the record is active.
+
+### Timestamp ownership rule (applies to every table)
+
+`created_at` and `updated_at` are owned by the database, not the application:
+
+- `created_at` — set by `DEFAULT NOW()` on insert. A DB trigger (`lock_created_at`) prevents any update. Hibernate maps it with `updatable = false` as a second layer of defence.
+- `updated_at` — set by `DEFAULT NOW()` on insert. A DB trigger (`set_updated_at`) overwrites it on every update automatically. Hibernate maps it with `insertable = false, updatable = false` — it never touches this field at all.
+
+This means `updated_at` is accurate even if someone bypasses the application and runs SQL directly against the database.
 
 ---
 
@@ -29,12 +38,42 @@ CREATE TABLE users (
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
+
+-- created_at is immutable after insert — enforced at DB layer.
+CREATE OR REPLACE FUNCTION lock_created_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'created_at is immutable — it cannot be changed after insert';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_lock_created_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION lock_created_at();
+
+-- updated_at is fully DB-owned — fires on every UPDATE regardless of which column changed.
+-- Application code never sets this field (Hibernate: insertable=false, updatable=false).
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_set_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 ```
 
 **Design notes:**
 - `username` and `email` uniqueness is enforced at the DB layer, not just application layer. The `409 Conflict` response on registration is driven by catching a `UniqueConstraintViolationException`.
 - `failed_login_count` and `locked_until` implement your brute force lockout (5 attempts / 10 minutes) at the DB layer. The application resets `failed_login_count` to 0 on successful login.
 - `is_discoverable` lives here rather than `user_profiles` because the Auth module owns it and checks it during access grant creation.
+- `password_hash` is `VARCHAR(255)` by convention. BCrypt always produces exactly 60 characters — the extra length is defensive future-proofing in case the hashing algorithm changes. `password_hash` is never queried or indexed — it is only read after a username lookup and verified in application code.
 
 ---
 
@@ -43,20 +82,30 @@ Tracks invalidated JWT tokens for synchronous logout.
 
 ```sql
 CREATE TABLE revoked_tokens (
-    id              UUID        PRIMARY KEY,
-    user_id         UUID        NOT NULL REFERENCES users(id),
-    token_jti       VARCHAR(255) NOT NULL UNIQUE,  -- JWT ID claim
-    revoked_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at      TIMESTAMPTZ NOT NULL            -- token's original expiry
+    id          UUID            PRIMARY KEY,
+    user_id     UUID            NOT NULL REFERENCES users(id),
+    token_jti   VARCHAR(255)    NOT NULL UNIQUE,
+    revoked_at  TIMESTAMPTZ     NOT NULL,
+    expires_at  TIMESTAMPTZ     NOT NULL,
+
+    -- Revocation cannot be set to a future time — that has no meaning.
+    -- Small buffer of 5 seconds accounts for clock skew between app servers.
+    CONSTRAINT chk_revoked_at_not_future
+        CHECK (revoked_at <= NOW() + INTERVAL '5 seconds')
 );
 
-CREATE INDEX idx_revoked_tokens_jti ON revoked_tokens(token_jti);
+CREATE INDEX idx_revoked_tokens_jti     ON revoked_tokens(token_jti);
 CREATE INDEX idx_revoked_tokens_expires ON revoked_tokens(expires_at);
 ```
 
 **Design notes:**
 - `token_jti` is the JWT `jti` (JWT ID) claim — a unique identifier baked into every token at issuance. On every authenticated request, your filter looks up the `jti` in this table. If found, reject the request.
 - The `expires_at` index enables a cleanup job: rows where `expires_at < NOW()` are dead weight (the token would have been rejected by expiry anyway). A nightly job deletes them. Without this, the table grows forever.
+- `revoked_at` has **no DEFAULT** — the application must set it explicitly. This preserves the audit relationship between `revoked_at` and `expires_at`:
+  - `revoked_at < expires_at` — normal logout, token was still valid when revoked
+  - `revoked_at > expires_at` — delayed revocation (async case), token had already expired
+  - A `DEFAULT NOW()` would collapse both cases into the same insert-time timestamp, hiding the distinction entirely.
+- `chk_revoked_at_not_future` rejects future values — there is no valid scenario where a token is pre-emptively revoked before the action occurs.
 
 ---
 
