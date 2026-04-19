@@ -1,14 +1,25 @@
 package com.finance.service.impl;
 
+import com.finance.command.LoginCommand;
 import com.finance.command.RegisterCommand;
 import com.finance.domain.RegisteredUser;
+import com.finance.domain.TokenPair;
 import com.finance.entity.UserEntity;
+import com.finance.entity.RevokedTokenEntity;
+import com.finance.exception.AccountLockedException;
+import com.finance.exception.InvalidCredentialsException;
 import com.finance.exception.UserAlreadyExistsException;
+import com.finance.repository.RevokedTokenRepository;
 import com.finance.repository.UserRepository;
+import com.finance.security.JwtService;
 import com.finance.service.AuthService;
-import com.finance.config.ClockConfig;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 // The implementation of the AuthService contract.
 // This class knows about JPA and BCrypt — infrastructure details.
@@ -16,22 +27,29 @@ import org.springframework.stereotype.Service;
 @Service
 public class PostgresAuthService implements AuthService {
 
-    private final UserRepository userRepository;
-    private final BCryptPasswordEncoder passwordEncoder;
-    private final Clock clock; // injected, not hardcoded
+    // Brute force lockout constants — externalise to config if policy needs to change.
+    private static final int    MAX_FAILED_ATTEMPTS  = 5;
+    private static final int    LOCKOUT_MINUTES      = 15;
 
-    // Constructor injection — the Spring way. No @Autowired needed when there
-    // is exactly one constructor. Spring injects the UserRepository bean automatically.
-    public PostgresAuthService(UserRepository userRepository, Clock clock) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = new BCryptPasswordEncoder();
-        this.clock = clock;
+    private final UserRepository        userRepository;
+    private final RevokedTokenRepository revokedTokenRepository;
+    private final BCryptPasswordEncoder passwordEncoder;
+    private final JwtService            jwtService;
+    private final Clock                 clock;
+
+    public PostgresAuthService(UserRepository userRepository,
+                                RevokedTokenRepository revokedTokenRepository,
+                                JwtService jwtService,
+                                Clock clock) {
+        this.userRepository       = userRepository;
+        this.revokedTokenRepository = revokedTokenRepository;
+        this.passwordEncoder      = new BCryptPasswordEncoder();
+        this.jwtService           = jwtService;
+        this.clock                = clock;
     }
 
     @Override
     public RegisteredUser register(RegisterCommand command) {
-        // Check before insert — avoids relying solely on DB unique constraint exceptions,
-        // which would give us a less controlled error path.
         if (userRepository.existsByUsernameOrEmail(command.username(), command.email())) {
             throw new UserAlreadyExistsException();
         }
@@ -39,16 +57,8 @@ public class PostgresAuthService implements AuthService {
         UserEntity user = new UserEntity();
         user.setUsername(command.username());
         user.setEmail(command.email());
-        // BCrypt hash — the plaintext password is never stored. Ever.
-        // passwordEncoder.encode() generates a new random salt each time,
-        // so two users with the same password produce different hashes.
         user.setPasswordHash(passwordEncoder.encode(command.password()));
-        user.setCreatedAt(Instant.now(clock)); // clock-controlled, not system clock
-
         UserEntity savedUser = userRepository.save(user);
-
-        // Map entity → domain object. The controller receives domain vocabulary,
-        // not JPA entities.
         return new RegisteredUser(
                 savedUser.getId(),
                 savedUser.getUsername(),
@@ -65,24 +75,24 @@ public class PostgresAuthService implements AuthService {
         // the caller cannot distinguish which case occurred.
         UserEntity user = userRepository.findByUsername(command.username())
                 .orElseThrow(InvalidCredentialsException::new);
- 
+
         // Check lockout before attempting password verification.
         // This prevents timing attacks where BCrypt comparison time
         // reveals that the username exists.
         if (isLocked(user)) {
             throw new AccountLockedException(user.getLockedUntil());
         }
- 
+
         if (!passwordEncoder.matches(command.password(), user.getPasswordHash())) {
             handleFailedAttempt(user);
             throw new InvalidCredentialsException();
         }
- 
+
         // Successful login — reset the failed attempt counter.
         resetFailedAttempts(user);
- 
-        String token = jwtService.generateToken(user.getId());
- 
+
+        String token = jwtService.generateToken(user.getId(), user.getUsername());
+
         return new TokenPair(
                 token,
                 jwtService.getExpiry(token),
@@ -99,38 +109,38 @@ public class PostgresAuthService implements AuthService {
         // but we let the exception propagate if somehow it slips through.
         String  jti      = jwtService.getJti(token);
         Instant expiresAt = jwtService.getExpiry(token);
- 
+
         // Idempotent — if the token is already revoked, do nothing.
         // This handles the case where the client calls logout twice (e.g. retry on network failure).
         if (revokedTokenRepository.existsByTokenJti(jti)) {
             return;
         }
- 
+
         RevokedTokenEntity revoked = new RevokedTokenEntity();
         revoked.setUserId(jwtService.getUserId(token));
         revoked.setTokenJti(jti);
         revoked.setRevokedAt(Instant.now(clock));
         revoked.setExpiresAt(expiresAt);
- 
+
         revokedTokenRepository.save(revoked);
     }
-  
+
     private boolean isLocked(UserEntity user) {
         return user.getLockedUntil() != null
                 && user.getLockedUntil().isAfter(Instant.now(clock));
     }
- 
+
     private void handleFailedAttempt(UserEntity user) {
         int attempts = user.getFailedLoginCount() + 1;
         user.setFailedLoginCount(attempts);
- 
+
         if (attempts >= MAX_FAILED_ATTEMPTS) {
             user.setLockedUntil(Instant.now(clock).plus(LOCKOUT_MINUTES, ChronoUnit.MINUTES));
         }
- 
+
         userRepository.save(user);
     }
- 
+
     private void resetFailedAttempts(UserEntity user) {
         user.setFailedLoginCount(0);
         user.setLockedUntil(null);

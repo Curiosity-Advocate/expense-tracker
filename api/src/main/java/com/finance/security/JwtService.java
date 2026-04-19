@@ -33,13 +33,14 @@ public class JwtService {
     // Generates a signed JWT for the given user.
     // jti (JWT ID) is a unique identifier per token — used by the revocation table
     // to identify and reject specific tokens after logout.
-    public String generateToken(UUID userId) {
+    public String generateToken(UUID userId, String username) {
         Instant now = Instant.now();
         Instant expiry = now.plus(expiryDays, ChronoUnit.DAYS);
 
         return Jwts.builder()
                 .subject(userId.toString())
-                .id(UUID.randomUUID().toString())   // jti claim — unique per token
+                .id(UUID.randomUUID().toString())       // jti — unique per token, used for revocation
+                .claim("username", username)            // needed by filter to build UserPrincipal
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(expiry))
                 .signWith(signingKey)
