@@ -8,6 +8,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -79,5 +81,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    // Prevent Spring Boot from auto-registering this filter as a standalone servlet filter.
+    // It should only run inside the Spring Security filter chain where SecurityConfig
+    // rules (permitAll for /auth/**) are applied first.
+    // Without this, the filter runs outside the security chain and intercepts ALL requests
+    // including public endpoints like /register.
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration(
+            JwtAuthenticationFilter filter) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration =
+                new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 }

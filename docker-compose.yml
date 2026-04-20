@@ -1,0 +1,10 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: expense-tracker-db
+    environment:
+      - POSTGRES_DB=expense_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    ports:
+      - "5432:5432"

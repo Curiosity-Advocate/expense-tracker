@@ -21,3 +21,6 @@ Thumbs.db
 
 # --- Secrets (Safety First) ---
 .env
+
+$ --- Hidden Notes
+Hidden/*

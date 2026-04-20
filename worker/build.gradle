@@ -1,10 +1,12 @@
-// worker/build.gradle
 plugins {
     id 'org.springframework.boot'
-    id 'io.spring.dependency-management'
 }
 
 dependencies {
-    implementation project(':core') // The "Inward" rule
-    implementation 'org.springframework.boot:spring-boot-starter' // Notice: no "-web" here!
+    // Native Gradle BOM import — pins all Spring Boot dependency versions.
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.3.0')
+
+    implementation project(':core')
+    // No spring-boot-starter-web — worker has no HTTP server
+    implementation 'org.springframework.boot:spring-boot-starter'
 }

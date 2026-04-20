@@ -1,7 +1,9 @@
 package com.finance.service;
 
+import com.finance.command.LoginCommand;
 import com.finance.command.RegisterCommand;
 import com.finance.domain.RegisteredUser;
+import com.finance.domain.TokenPair;
 
 // The contract. Lives in core so both api and worker can depend on it.
 // Only register for now — login and logout are added in steps 5 and 6.

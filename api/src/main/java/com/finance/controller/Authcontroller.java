@@ -1,7 +1,11 @@
 package com.finance.controller;
 
 import com.finance.command.RegisterCommand;
+import com.finance.command.LoginCommand;
 import com.finance.domain.RegisteredUser;
+import com.finance.domain.TokenPair;
+import com.finance.dto.LoginRequest;
+import com.finance.dto.LoginResponse;
 import com.finance.dto.RegisterRequest;
 import com.finance.dto.RegisterResponse;
 import com.finance.service.AuthService;
@@ -31,8 +35,7 @@ public class AuthController {
         RegisterCommand command = new RegisterCommand(
                 request.username(),
                 request.email(),
-                request.password()
-        );
+                request.password());
 
         RegisteredUser result = authService.register(command);
 
@@ -40,8 +43,7 @@ public class AuthController {
                 result.userId(),
                 result.username(),
                 result.email(),
-                result.createdAt()
-        );
+                result.createdAt());
 
         // Wrapped in "data" envelope per api_design.md contract
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("data", response));
@@ -51,28 +53,27 @@ public class AuthController {
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
         LoginCommand command = new LoginCommand(
                 request.username(),
-                request.password()
-        );
- 
+                request.password());
+
         TokenPair result = authService.login(command);
- 
+
         LoginResponse response = new LoginResponse(
                 result.accessToken(),
                 result.expiresAt(),
-                result.tokenType()
-        );
- 
+                result.tokenType());
+
         return ResponseEntity.ok(Map.of("data", response));
     }
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(
             @RequestHeader("Authorization") String authorizationHeader) {
- 
-        // Header format is "Bearer <token>" — strip the prefix before passing to service.
+
+        // Header format is "Bearer <token>" — strip the prefix before passing to
+        // service.
         String token = authorizationHeader.replace("Bearer ", "");
         authService.logout(token);
- 
+
         // 204 No Content — logout has no meaningful body to return.
         return ResponseEntity.noContent().build();
     }

@@ -1,9 +1,11 @@
-// No Spring Boot plugin here — core is a plain Java library
-// It has NO main class, NO Spring Boot starter-web, nothing infrastructure-specific
+// core is a plain Java library — no Spring Boot plugin, no main class.
+// It holds interfaces and domain objects shared by api and worker.
 dependencies {
-    // Only essential, non-framework libraries go here
+    // Native Gradle BOM import — replaces io.spring.dependency-management plugin.
+    // This pins all Spring Boot dependency versions without needing an extra plugin.
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.3.0')
+
     implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
 
-    // Testing tools (Pure JUnit/AssertJ)
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

@@ -41,6 +41,7 @@ public class SecurityConfig {
                     ex.authenticationEntryPoint(jwtAuthenticationEntryPoint))
 
             .authorizeHttpRequests(auth -> auth
+                    .requestMatchers("/error").permitAll()
                     .requestMatchers("/api/v1/auth/**").permitAll()
                     .requestMatchers(
                             "/swagger-ui.html",
