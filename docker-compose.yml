@@ -2,9 +2,12 @@ services:
   db:
     image: postgres:16-alpine
     container_name: expense-tracker-db
-    environment:
-      - POSTGRES_DB=expense_db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
-    ports:
+  environment:
+    - POSTGRES_DB=expense_db
+    - POSTGRES_USER=${DB_SUPERUSER_USERNAME}
+    - POSTGRES_PASSWORD=${DB_PASSWORD}
+    - APP_DB_PASSWORD=${DB_APP_PASSWORD}
+  ports:
       - "5432:5432"
+    volumes:
+      - ./docker/init-db.sh:/docker-entrypoint-initdb.d/01_init.sql

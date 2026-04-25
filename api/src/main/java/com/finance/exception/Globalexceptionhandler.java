@@ -35,6 +35,12 @@ public class GlobalExceptionHandler {
                         "Account temporarily locked. Try again after " + ex.getLockedUntil()));
     }
 
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<?> handleUnexpected(Exception ex) {
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(errorEnvelope("INTERNAL_ERROR", ex.getMessage()));
+    }
 
     private Map<String, Object> errorEnvelope(String code, String message) {
         // create immutable map

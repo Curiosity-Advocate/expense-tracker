@@ -1,29 +1,31 @@
 spring:
   application:
     name: expense-tracker-api
-  
-  # Step 3: Database configuration
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/expense_db}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD}
+    username: ${DB_USERNAME}
+    password: ${DB_APP_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
-jpa:
-  show-sql: true
-  properties:
-    hibernate:
-      format_sql: true
-      ddl-auto: validate # Validate the java representation of DB tables don't drift at run time
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        ddl-auto: validate
 
   flyway:
+    url: ${DB_URL}
+    user: ${DB_SUPERUSER_USERNAME}
+    password: ${DB_PASSWORD}
     enabled: true
     baseline-on-migrate: true
 
 app:
   jwt:
-    secret: ${JWT_SECRET}          # must be set as environment variable — never hardcoded
-    expiry-days: 7                 # V1: long-lived tokens. Step-up auth handles sensitive actions.
+    secret: ${JWT_SECRET}
+    expiry-days: 7
 
 springdoc:
   swagger-ui:

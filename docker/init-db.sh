@@ -1,0 +1,18 @@
+#!/bin/bash
+psql -U postgres -d expense_db <<EOF
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'expense_app') THEN
+        CREATE ROLE expense_app LOGIN PASSWORD '${APP_DB_PASSWORD}';
+    END IF;
+END;
+\$\$;
+
+GRANT CONNECT ON DATABASE expense_db TO expense_app;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO expense_app;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO expense_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT ALL PRIVILEGES ON TABLES TO expense_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT ALL PRIVILEGES ON SEQUENCES TO expense_app;
+EOF
