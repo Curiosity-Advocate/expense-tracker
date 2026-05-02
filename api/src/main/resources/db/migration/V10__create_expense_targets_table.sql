@@ -37,11 +37,9 @@ CREATE TABLE expense_targets (
     -- Prevents two active DINING targets for April 2026.
     -- WHERE deleted_at IS NULL means soft-deleted targets
     -- don't block creating a replacement for the same period.
-    CONSTRAINT uq_one_target_per_category_per_period
-        UNIQUE NULLS NOT DISTINCT (
-            user_id, target_type, category_id,
-            period_year, period_month
-        ) WHERE (deleted_at IS NULL)
+    CREATE UNIQUE INDEX uq_one_target_per_category_per_period
+        ON expense_targets(user_id, target_type, category_id, period_year, period_month)
+        WHERE deleted_at IS NULL;
 );
 
 CREATE TRIGGER trg_expense_targets_set_updated_at

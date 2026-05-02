@@ -1,8 +1,8 @@
 package com.finance.entity;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.Generated;
-import org.hibernate.annotations.GenerationTime;
+import org.hibernate.annotations.CurrentTimestamp;
+import org.hibernate.generator.EventType;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -54,7 +54,7 @@ public class UserEntity {
     // the DB,
     // bypassing the application layer.
     @Column(name = "updated_at", nullable = false, insertable = false, updatable = false)
-    @Generated(GenerationTime.ALWAYS)
+    @CurrentTimestamp(event = {EventType.INSERT, EventType.UPDATE})
     private Instant updatedAt;
 
     // @PrePersist fires automatically before JPA executes the INSERT.

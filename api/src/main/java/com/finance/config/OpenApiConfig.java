@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.info.Info;
 import org.springframework.context.annotation.Configuration;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 
 @Configuration
 @OpenAPIDefinition(
@@ -12,8 +13,8 @@ import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
         title       = "Expense Tracker API",
         version     = "v1",
         description = "Expense tracking and bank integration API"
-    )
-    security = @SecurityRequirement(name = "bearerAuth")
+    ),
+    security = { @SecurityRequirement(name = "bearerAuth") }
 )
 @SecurityScheme(
     name         = "bearerAuth",

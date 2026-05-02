@@ -9,6 +9,7 @@ import com.finance.dto.LoginResponse;
 import com.finance.dto.RegisterRequest;
 import com.finance.dto.RegisterResponse;
 import com.finance.service.AuthService;
+import com.finance.service.UserSetupService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,9 +26,11 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService authService;
+    private final UserSetupService userSetupService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, UserSetupService userSetupService) {
         this.authService = authService;
+        this.userSetupService = userSetupService;
     }
 
     @PostMapping("/register")
@@ -38,6 +41,8 @@ public class AuthController {
                 request.password());
 
         RegisteredUser result = authService.register(command);
+
+        userSetupService.setupNewUser(result.userId());
 
         RegisterResponse response = new RegisterResponse(
                 result.userId(),

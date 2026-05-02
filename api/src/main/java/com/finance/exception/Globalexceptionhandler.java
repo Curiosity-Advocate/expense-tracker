@@ -41,6 +41,34 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(errorEnvelope("INTERNAL_ERROR", ex.getMessage()));
     }
+    
+    @ExceptionHandler(DuplicateIdempotencyKeyException.class)
+    public ResponseEntity<?> handleDuplicateIdempotencyKey(DuplicateIdempotencyKeyException ex) {
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(errorEnvelope("DUPLICATE_IDEMPOTENCY_KEY", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ExpenseNotFoundException.class)
+    public ResponseEntity<?> handleExpenseNotFound(ExpenseNotFoundException ex) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(errorEnvelope("EXPENSE_NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(FieldImmutableException.class)
+    public ResponseEntity<?> handleFieldImmutable(FieldImmutableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(errorEnvelope("FIELD_IMMUTABLE_FOR_BANK_IMPORT", ex.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidQueryException.class)
+    public ResponseEntity<?> handleInvalidQuery(InvalidQueryException ex) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(errorEnvelope("INVALID_QUERY", ex.getMessage()));
+    }
 
     private Map<String, Object> errorEnvelope(String code, String message) {
         // create immutable map
