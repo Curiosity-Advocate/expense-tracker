@@ -1,0 +1,64 @@
+# Render Infrastructure as Code
+# One-click deploy: https://render.com/deploy
+#
+# Before deploying, set the following in the Render dashboard
+# (marked sync: false below):
+#   DB_SUPERUSER_USERNAME  — Render gives you this for your managed DB
+#   DB_SUPERUSER_PASSWORD  — same
+#   DB_USERNAME            — app-role username (create via psql after first deploy)
+#   DB_APP_PASSWORD        — app-role password
+
+databases:
+  - name: expense-tracker-db
+    databaseName: expense_tracker
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: expense-tracker-api
+    region: oregon
+    plan: free
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: expense-tracker-db
+          property: connectionString
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_APP_PASSWORD
+        sync: false
+      - key: DB_SUPERUSER_USERNAME
+        sync: false
+      - key: DB_SUPERUSER_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: "8080"
+
+  # Worker runs as a background service.
+  # On Render's free plan, swap this for a Cron Job if the free background
+  # worker slot is already used.
+  - type: worker
+    name: expense-tracker-worker
+    region: oregon
+    plan: free
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    dockerContext: .
+    autoDeploy: true
+    envVars:
+      - key: DB_URL
+        fromDatabase:
+          name: expense-tracker-db
+          property: connectionString
+      - key: DB_SUPERUSER_USERNAME
+        sync: false
+      - key: DB_SUPERUSER_PASSWORD
+        sync: false

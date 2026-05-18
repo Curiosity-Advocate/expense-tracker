@@ -1,0 +1,27 @@
+FROM eclipse-temurin:21-jdk-jammy AS build
+WORKDIR /workspace
+
+COPY gradlew gradlew
+COPY gradle gradle
+COPY settings.gradle settings.gradle
+COPY build.gradle build.gradle
+COPY core/build.gradle core/build.gradle
+COPY api/build.gradle api/build.gradle
+COPY worker/build.gradle worker/build.gradle
+
+RUN chmod +x gradlew
+RUN ./gradlew dependencies --no-daemon -q 2>/dev/null || true
+
+COPY core core
+COPY worker worker
+
+RUN ./gradlew :worker:bootJar --no-daemon -x test
+
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /app
+
+COPY --from=build /workspace/worker/build/libs/*.jar app.jar
+
+ENV JAVA_OPTS="-Xmx200m -Xss512k -XX:+UseContainerSupport"
+
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

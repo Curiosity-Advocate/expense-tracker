@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
+          restore-keys: ${{ runner.os }}-gradle
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Build (skip tests for speed)
+        run: ./gradlew :api:bootJar :worker:bootJar --no-daemon -x test
+
+      - name: Run unit tests
+        run: ./gradlew test --no-daemon
+
+      - name: Build API Docker image
+        run: docker build -t expense-tracker-api:${{ github.sha }} .
+
+      - name: Build Worker Docker image
+        run: docker build -f Dockerfile.worker -t expense-tracker-worker:${{ github.sha }} .

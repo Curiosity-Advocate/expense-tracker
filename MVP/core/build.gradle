@@ -1,0 +1,9 @@
+// core is a plain Java library — no Spring Boot plugin, no main class.
+// Holds domain objects, commands, queries, and service interfaces shared by api and worker.
+// Nothing in here knows about HTTP, JPA, or JWT.
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.3.0')
+    implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

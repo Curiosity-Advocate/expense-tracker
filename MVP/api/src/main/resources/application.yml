@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: expense-tracker-api
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/expense_db}
+    username: ${DB_USERNAME}
+    password: ${DB_APP_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    show-sql: false
+    properties:
+      hibernate:
+        ddl-auto: validate
+        format_sql: false
+
+  flyway:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/expense_db}
+    user: ${DB_SUPERUSER_USERNAME}
+    password: ${DB_PASSWORD}
+    enabled: true
+    baseline-on-migrate: true
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiry-days: 7
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+# Swagger UI is the live demo layer — no frontend needed.
+# Accessible at /swagger-ui.html once the app is running.
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /api-docs
+
+# Structured JSON logging — every line is a valid JSON object.
+# Makes logs grep-able and ready for a log aggregator later.
+logging:
+  pattern:
+    console: '{"ts":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%-5level","logger":"%logger{36}","msg":"%msg"}%n'
+  level:
+    root: INFO
+    com.finance: DEBUG

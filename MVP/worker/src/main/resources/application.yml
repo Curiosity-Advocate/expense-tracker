@@ -1,0 +1,26 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    # Worker uses superuser credentials so cleanup DELETEs bypass RLS policies.
+    # App-role credentials would be blocked by the user_id-scoped RLS policies.
+    username: ${DB_SUPERUSER_USERNAME}
+    password: ${DB_SUPERUSER_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 3
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+  flyway:
+    enabled: false  # api module owns migrations
+
+logging:
+  pattern:
+    console: '{"ts":"%d{yyyy-MM-dd''T''HH:mm:ss.SSSZ}","level":"%level","logger":"%logger{36}","msg":"%msg"}%n'
+  level:
+    root: INFO
+    com.finance: INFO
