@@ -28,7 +28,7 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/expenses")
-@Tag(name = "Expenses")
+@Tag(name = "Expenses", description = "All date parameters and date-typed fields (expenseDate, dateFrom, dateTo) must be sent as UTC dates in YYYY-MM-DD format.")
 @SecurityRequirement(name = "bearerAuth")
 public class ExpenseController {
 
@@ -97,7 +97,7 @@ public class ExpenseController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID id,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expenseDate,
-            @RequestBody UpdateExpenseRequest req) {
+            @Valid @RequestBody UpdateExpenseRequest req) {
         Expense updated = expenseService.updateExpense(principal.userId(), id, expenseDate,
                 new UpdateExpenseCommand(
                         req.amount(),
