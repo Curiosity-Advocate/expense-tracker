@@ -1,3 +1,6 @@
+server:
+  port: ${PORT:8080}
+
 spring:
   application:
     name: expense-tracker-api
@@ -6,8 +9,13 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_db}
     username: ${DB_USERNAME}
     password: ${DB_APP_PASSWORD}
+    hikari:
+      # Forces every new pool connection to UTC, regardless of DB or role defaults.
+      # Defence-in-depth — V16 also sets the DB-level default.
+      connection-init-sql: "SET TIME ZONE 'UTC'"
 
   jpa:
+    open-in-view: false
     show-sql: false
     properties:
       hibernate:
@@ -45,7 +53,7 @@ springdoc:
 # Makes logs grep-able and ready for a log aggregator later.
 logging:
   pattern:
-    console: '{"ts":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%-5level","logger":"%logger{36}","msg":"%msg"}%n'
+    console: '{"ts":"%d{yyyy-MM-dd''T''HH:mm:ss.SSSZ}","level":"%level","logger":"%logger{36}","traceId":"%X{traceId:-}","msg":"%msg"}%n'
   level:
     root: INFO
     com.finance: DEBUG
