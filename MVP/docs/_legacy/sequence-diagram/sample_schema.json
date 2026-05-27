@@ -1,0 +1,98 @@
+{
+  "title": "Bank Sync Flow",
+  "participants": [
+    { "id": "user",  "label": "User" },
+    { "id": "api",   "label": "API Server" },
+    { "id": "bank",  "label": "Bank Integration" },
+    { "id": "db",    "label": "Database" }
+  ],
+  "messages": [
+    {
+      "from": "user",
+      "to": "api",
+      "type": "sync",
+      "label": "POST /sync/bank",
+      "activate": "api"
+    },
+    {
+      "fragment": {
+        "type": "loop",
+        "label": "for each bank account",
+        "messages": [
+          {
+            "from": "api",
+            "to": "bank",
+            "type": "async",
+            "label": "fetchTransactions(accountId)",
+            "activate": "bank"
+          },
+          {
+            "fragment": {
+              "type": "alt",
+              "label": "bank responds",
+              "branches": [
+                {
+                  "condition": "success",
+                  "messages": [
+                    {
+                      "from": "bank",
+                      "to": "bank",
+                      "type": "self",
+                      "label": "parse + normalize"
+                    },
+                    {
+                      "from": "bank",
+                      "to": "api",
+                      "type": "return",
+                      "label": "Transaction[]",
+                      "deactivate": "bank"
+                    },
+                    {
+                      "from": "api",
+                      "to": "db",
+                      "type": "sync",
+                      "label": "INSERT expenses",
+                      "activate": "db"
+                    },
+                    {
+                      "from": "db",
+                      "to": "api",
+                      "type": "return",
+                      "label": "saved: N rows",
+                      "deactivate": "db"
+                    }
+                  ]
+                },
+                {
+                  "condition": "timeout / error",
+                  "messages": [
+                    {
+                      "from": "bank",
+                      "to": "api",
+                      "type": "return",
+                      "label": "Error",
+                      "deactivate": "bank"
+                    },
+                    {
+                      "from": "api",
+                      "to": "api",
+                      "type": "self",
+                      "label": "log + skip account"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "from": "api",
+      "to": "user",
+      "type": "return",
+      "label": "200 OK { synced: N }",
+      "deactivate": "api"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sequence Diagram</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Sans:wght@400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <div class="header-inner">
+        <span class="header-badge">sequence</span>
+        <h1 id="diagram-title" class="header-title">Loading…</h1>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><svg width="32" height="12"><line x1="0" y1="6" x2="24" y2="6" class="arr-solid"/><polygon points="24,2 32,6 24,10" class="arr-filled"/></svg>sync</span>
+        <span class="legend-item"><svg width="32" height="12"><line x1="0" y1="6" x2="22" y2="6" class="arr-solid"/><polyline points="22,2 30,6 22,10" class="arr-open"/></svg>async</span>
+        <span class="legend-item"><svg width="32" height="12"><line x1="0" y1="6" x2="22" y2="6" class="arr-dashed"/><polyline points="22,2 30,6 22,10" class="arr-open"/></svg>return</span>
+        <span class="legend-item"><svg width="28" height="12"><polyline points="2,6 18,6 18,10 2,10" class="arr-solid"/><polyline points="10,6 18,10" class="arr-open" style="display:none"/></svg>self</span>
+      </div>
+    </header>
+
+    <main class="diagram-wrapper">
+      <div id="diagram-container" class="diagram-container"></div>
+    </main>
+  </div>
+
+  <script src="schema.js"></script>
+  <script src="diagram.js"></script>
+</body>
+</html>

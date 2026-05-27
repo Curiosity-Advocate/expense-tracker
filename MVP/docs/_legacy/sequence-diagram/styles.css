@@ -1,0 +1,244 @@
+/* ─── Reset ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ─── Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  --bg:              #0d1117;
+  --bg-2:            #161b22;
+  --bg-3:            #1c2128;
+  --border:          #30363d;
+  --border-subtle:   #21262d;
+
+  --text-primary:    #e6edf3;
+  --text-secondary:  #8b949e;
+  --text-tertiary:   #484f58;
+
+  --accent:          #58a6ff;
+  --accent-muted:    rgba(88, 166, 255, 0.12);
+  --accent-border:   rgba(88, 166, 255, 0.3);
+
+  --green:           #3fb950;
+  --amber:           #e3b341;
+  --red:             #f85149;
+
+  --font-mono:  'IBM Plex Mono', monospace;
+  --font-sans:  'IBM Plex Sans', sans-serif;
+
+  /* ── Diagram palette (used as CSS vars inside SVG) ── */
+  --clr-lifeline:         #4a5568;
+  --clr-arrow:            #58a6ff;
+  --clr-activation-fill:  #1c3a5e;
+  --clr-activation-stroke:#388bfd;
+  --clr-seq-num:          #484f58;
+  --clr-msg-label:        #c9d1d9;
+  --clr-frag-bg:          rgba(56, 139, 253, 0.04);
+  --clr-frag-border:      #264f78;
+  --clr-frag-tab:         #1e3a5f;
+  --clr-frag-tab-text:    #79c0ff;
+  --clr-frag-label:       #8b949e;
+  --clr-divider:          #264f78;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────── */
+html, body { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+/* ─── Page layout ────────────────────────────────────────────────────── */
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 32px 80px;
+}
+
+/* ─── Header ─────────────────────────────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 28px 0 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 28px;
+}
+
+.header-inner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.header-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.header-title {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* ─── Legend ─────────────────────────────────────────────────────────── */
+.legend {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.legend-item svg {
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+/* Legend SVG elements — reuse diagram colors */
+.arr-solid  { stroke: var(--clr-arrow); stroke-width: 1.5; fill: none; }
+.arr-dashed { stroke: var(--clr-arrow); stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; }
+.arr-filled { fill: var(--clr-arrow); stroke: none; }
+.arr-open   { stroke: var(--clr-arrow); stroke-width: 1.5; fill: none;
+               stroke-linecap: round; stroke-linejoin: round; }
+
+/* ─── Diagram wrapper ────────────────────────────────────────────────── */
+.diagram-wrapper {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  overflow-x: auto;
+  /* subtle inner glow */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+.diagram-container {
+  padding: 28px 24px 28px;
+  min-width: max-content;
+}
+
+/* ─── SVG base ───────────────────────────────────────────────────────── */
+.sequence-diagram {
+  display: block;
+}
+
+/* ─── Lifelines ──────────────────────────────────────────────────────── */
+.lifeline {
+  stroke: var(--clr-lifeline);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+/* ─── Participant boxes ──────────────────────────────────────────────── */
+.participant-box {
+  fill: var(--bg-3);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.participant-text {
+  fill: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ─── Activation bars ────────────────────────────────────────────────── */
+.activation-bar {
+  fill: var(--clr-activation-fill);
+  stroke: var(--clr-activation-stroke);
+  stroke-width: 0.5;
+}
+
+/* ─── Arrows / message lines ─────────────────────────────────────────── */
+.arrow-line {
+  stroke: var(--clr-arrow);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.arrow-line.dashed {
+  stroke-dasharray: 5 3;
+}
+
+/* ─── Message labels ─────────────────────────────────────────────────── */
+.message-label {
+  fill: var(--clr-msg-label);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ─── Sequence numbers ───────────────────────────────────────────────── */
+.seq-num {
+  fill: var(--clr-seq-num);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* ─── Fragment boxes ─────────────────────────────────────────────────── */
+.fragment-box {
+  fill: var(--clr-frag-bg);
+  stroke: var(--clr-frag-border);
+  stroke-width: 1;
+}
+
+.fragment-tab {
+  fill: var(--clr-frag-tab);
+}
+
+.fragment-type-text {
+  fill: var(--clr-frag-tab-text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+}
+
+.fragment-label-text {
+  fill: var(--clr-frag-label);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.fragment-divider {
+  stroke: var(--clr-divider);
+  stroke-width: 0.5;
+  stroke-dasharray: 5 3;
+}
+
+.fragment-condition-text {
+  fill: var(--clr-frag-label);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* ─── Error state ────────────────────────────────────────────────────── */
+.error-msg {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--red);
+  padding: 20px 0;
+}
