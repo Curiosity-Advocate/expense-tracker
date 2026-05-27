@@ -57,10 +57,13 @@ public class JwtService {
     }
 
     public boolean isValid(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
         try {
             claims(token);
             return true;
-        } catch (JwtException | IllegalArgumentException e) {
+        } catch (JwtException e) {
             return false;
         }
     }

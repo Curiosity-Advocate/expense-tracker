@@ -27,7 +27,11 @@ public class RlsSessionAspect {
     @PersistenceContext
     private EntityManager entityManager;
 
-    @Before("@annotation(org.springframework.transaction.annotation.Transactional)")
+    // Matches @Transactional declared on the method directly (@annotation) OR on
+    // the enclosing class (@within) — Spring's class-level @Transactional applies
+    // to all methods but AspectJ's @annotation only sees method-level annotations.
+    @Before("@annotation(org.springframework.transaction.annotation.Transactional)"
+            + " || @within(org.springframework.transaction.annotation.Transactional)")
     public void setRlsContext() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
@@ -36,9 +40,9 @@ public class RlsSessionAspect {
                 && auth.getPrincipal() instanceof UserPrincipal principal) {
 
             entityManager
-                    .createNativeQuery(
-                            "SET LOCAL app.current_user_id = '" + principal.userId() + "'")
-                    .executeUpdate();
+                    .createNativeQuery("SELECT set_config('app.current_user_id', :uid, true)")
+                    .setParameter("uid", principal.userId().toString())
+                    .getSingleResult();
         }
     }
 }
