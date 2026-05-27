@@ -1,5 +1,6 @@
 package com.finance.job;
 
+import com.finance.alert.JobFailureAlerter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -15,16 +16,20 @@ public class MaterializedViewRefreshJob {
     private static final Logger log = LoggerFactory.getLogger(MaterializedViewRefreshJob.class);
 
     private final JdbcTemplate jdbc;
+    private final JobFailureAlerter alerter;
 
-    public MaterializedViewRefreshJob(JdbcTemplate jdbc) {
+    public MaterializedViewRefreshJob(JdbcTemplate jdbc, JobFailureAlerter alerter) {
         this.jdbc = jdbc;
+        this.alerter = alerter;
     }
 
     @Scheduled(cron = "0 30 2 * * *", zone = "UTC")
     public void refresh() {
-        long start = System.currentTimeMillis();
-        jdbc.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_expense_summary");
-        jdbc.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_merchant_summary");
-        log.info("Materialized views refreshed in {}ms", System.currentTimeMillis() - start);
+        alerter.executeMonitored("refreshMaterializedViews", () -> {
+            long start = System.currentTimeMillis();
+            jdbc.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_expense_summary");
+            jdbc.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_merchant_summary");
+            log.info("Materialized views refreshed in {}ms", System.currentTimeMillis() - start);
+        });
     }
 }

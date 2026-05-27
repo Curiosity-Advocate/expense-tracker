@@ -5,8 +5,9 @@ services:
     environment:
       POSTGRES_DB: expense_db
       POSTGRES_USER: ${DB_SUPERUSER_USERNAME}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      APP_DB_PASSWORD: ${DB_APP_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_SUPERUSER_PASSWORD}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -17,6 +18,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # MailHog captures all outbound SMTP from the worker in local dev so
+  # JobFailureAlerter emails go to a web UI instead of a real inbox.
+  # Production points spring.mail.host at a real SMTP server — see
+  # docs/operations/scheduled-jobs.md.
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: expense-tracker-mailhog
+    ports:
+      - "1025:1025"   # SMTP (worker writes here)
+      - "8025:8025"   # Web UI — open http://localhost:8025
 
 volumes:
   postgres_data:
