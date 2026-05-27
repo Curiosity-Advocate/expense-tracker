@@ -1,4 +1,5 @@
 rootProject.name = 'expense-tracker-mvp'
 include 'core'
+include 'adapters'
 include 'api'
 include 'worker'

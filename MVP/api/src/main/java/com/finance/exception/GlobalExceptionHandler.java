@@ -1,10 +1,12 @@
 package com.finance.exception;
 
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 import java.util.Map;
@@ -51,6 +53,18 @@ public class GlobalExceptionHandler {
                 .reduce((a, b) -> a + "; " + b)
                 .orElse("Validation failed");
         return error(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message);
+    }
+
+    // Triggered when a query/path parameter can't be coerced to its declared type
+    // (e.g. ?groupBy=month against the GroupBy enum, or a malformed UUID/date).
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<?> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String paramName = ex.getName();
+        Object badValue = ex.getValue();
+        String expectedType = ex.getRequiredType() != null
+                ? ex.getRequiredType().getSimpleName() : "expected type";
+        return error(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                paramName + ": '" + badValue + "' is not a valid " + expectedType);
     }
 
     // ── Expenses ──────────────────────────────────────────────────────────────
@@ -126,11 +140,15 @@ public class GlobalExceptionHandler {
     // ── Helper ────────────────────────────────────────────────────────────────
 
     private ResponseEntity<?> error(HttpStatus status, String code, String message) {
+        // TraceIdFilter populates MDC for every HTTP request. The fallback covers
+        // exception paths fired outside the filter chain (e.g. early startup).
+        String traceId = MDC.get("traceId");
+        if (traceId == null) traceId = UUID.randomUUID().toString();
         return ResponseEntity.status(status).body(Map.of("error", Map.of(
                 "code",      code,
                 "message",   message,
                 "timestamp", Instant.now().toString(),
-                "traceId",   UUID.randomUUID().toString()
+                "traceId",   traceId
         )));
     }
 }

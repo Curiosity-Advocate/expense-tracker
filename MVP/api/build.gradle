@@ -6,12 +6,13 @@ dependencies {
     // BOM import pins all Spring Boot dependency versions.
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.3.0')
 
-    implementation project(':core')
+    // adapters brings :core transitively, plus JPA / Postgres / Flyway / security-crypto.
+    implementation project(':adapters')
 
-    // Web + AOP + JPA + Validation + Security
+    // HTTP + AOP + Validation + Security live here because Spring (and Spring MVC
+    // specifically) are taken as givens — they aren't candidates for swapping.
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-aop'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-security'
 
@@ -21,11 +22,6 @@ dependencies {
     // Health check endpoint for Render deployment
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
-    // PostgreSQL driver + Flyway migrations
-    runtimeOnly 'org.postgresql:postgresql'
-    implementation 'org.flywaydb:flyway-core'
-    implementation 'org.flywaydb:flyway-database-postgresql'
-
     // JWT — api module only, core never touches JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
@@ -33,4 +29,7 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
+
+    // v1.1 #1 — architecture rules enforcement
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
 }
