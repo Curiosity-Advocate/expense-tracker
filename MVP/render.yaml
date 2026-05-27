@@ -25,10 +25,18 @@ services:
     healthCheckPath: /actuator/health
     autoDeploy: true
     envVars:
-      - key: DB_URL
+      - key: DB_HOST
         fromDatabase:
           name: expense-tracker-db
-          property: connectionString
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: expense-tracker-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: expense-tracker-db
+          property: database
       - key: DB_USERNAME
         sync: false
       - key: DB_APP_PASSWORD
@@ -66,17 +74,7 @@ services:
         fromDatabase:
           name: expense-tracker-db
           property: database
-      - key: DB_USERNAME
-        fromDatabase:
-          name: expense-tracker-db
-          property: user
-      - key: DB_APP_PASSWORD
-        sync: false
       - key: DB_SUPERUSER_USERNAME
         sync: false
       - key: DB_SUPERUSER_PASSWORD
         sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: PORT
-        value: "8080"

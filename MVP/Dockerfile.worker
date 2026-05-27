@@ -24,4 +24,4 @@ COPY --from=build /workspace/worker/build/libs/*.jar app.jar
 
 ENV JAVA_OPTS="-Xmx200m -Xss512k -XX:+UseContainerSupport"
 
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

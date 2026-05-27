@@ -29,4 +29,4 @@ EXPOSE 8080
 # Allow JVM heap tuning via env var for Render's free tier (512 MB RAM)
 ENV JAVA_OPTS="-Xmx400m -Xss512k -XX:+UseContainerSupport"
 
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

@@ -1,0 +1,40 @@
+# Local environment & secrets — critical to exclude
+.env
+.env.*
+
+# Version control
+.git/
+.gitignore
+
+# Gradle local cache & build outputs (re-generated inside the container)
+.gradle/
+**/.gradle/
+build/
+**/build/
+out/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# OS metadata
+.DS_Store
+**/.DS_Store
+
+# Windows-only Gradle wrapper (we run on Linux in the container)
+gradlew.bat
+
+# Docs & CI — not needed in the runtime image
+README.md
+docs/
+.github/
+
+# Docker / deployment config — not needed inside the image being built
+Dockerfile*
+docker-compose.yml
+docker/
+render.yaml
+
+# Test sources — skipped by the boot jar build (-x test)
+**/src/test/
