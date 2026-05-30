@@ -1,7 +1,6 @@
 package com.finance.security;
 
 import com.finance.domain.UserPrincipal;
-import com.finance.repository.RevokedTokenRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,19 +15,20 @@ import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 
-// Runs once per request. Extracts the JWT, validates it, checks the revocation
-// table, then sets the UserPrincipal in the SecurityContext for the request.
-// If any check fails the request continues unauthenticated — Spring Security
-// will reject it at the route level if authentication is required.
+// Runs once per request. Extracts the JWT, validates signature + expiry,
+// and sets the UserPrincipal in the SecurityContext for the request.
+//
+// No per-request DB lookup: S4 introduced 15-minute access tokens, so the
+// stolen-token window is bounded by expiry alone. Revocation (logout, reuse
+// detection) is enforced on the refresh-token side, not on access tokens.
+// See ADR-0009 (superseded) and the S4 design.
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
-    private final RevokedTokenRepository revokedTokenRepository;
 
-    public JwtAuthenticationFilter(JwtService jwtService, RevokedTokenRepository revokedTokenRepository) {
+    public JwtAuthenticationFilter(JwtService jwtService) {
         this.jwtService = jwtService;
-        this.revokedTokenRepository = revokedTokenRepository;
     }
 
     @Override
@@ -49,13 +49,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        String jti = jwtService.getJti(token);
-        if (revokedTokenRepository.existsByTokenJti(UUID.fromString(jti))) {
-            chain.doFilter(request, response);
-            return;
-        }
-
-        UUID userId   = jwtService.getUserId(token);
+        UUID userId    = jwtService.getUserId(token);
         String username = jwtService.getUsername(token);
 
         UserPrincipal principal = new UserPrincipal(userId, username);

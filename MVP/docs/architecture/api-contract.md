@@ -98,27 +98,41 @@ sequenceDiagram
     end
 
     BL->>DB: Reset failed attempt counter
-    BL->>BL: Generate JWT
-    BL-->>HTTP: TokenPair
-    HTTP-->>User: 200 OK with accessToken
+    BL->>BL: Generate access JWT (15 min) and opaque refresh token (7 days)
+    BL->>DB: INSERT refresh_tokens row (rotated_from = NULL, session_started_at = NOW)
+    BL-->>HTTP: TokenPair (access + refresh + their expiries)
+    HTTP-->>User: 200 OK with both tokens
 ```
 
-**Token lifecycle:**
+**Token lifecycle (S4):**
 
 ```mermaid
 stateDiagram-v2
     [*] --> Active: Login successful
-    Active --> Revoked: User logs out
-    Active --> Expired: 7 days elapsed
-    Revoked --> [*]: Cleanup job removes row
-    Expired --> [*]: Cleanup job removes row
+    Active --> Rotated: /refresh used this token (next chain link issued)
+    Active --> LoggedOut: User logs out
+    Active --> Expired: session_started_at + 7 days
+    Rotated --> [*]
+    LoggedOut --> [*]
+    Expired --> [*]
 ```
+
+The access token is **not** tracked server-side — it expires naturally within 15 minutes. The refresh-token row is the single auditable record of issuance and revocation.
 
 **Request:** `{ "username": "...", "password": "..." }`. Both non-blank.
 
 **Business restrictions:** Username must exist; password must match BCrypt hash; account not locked.
 
-**Success `200 OK`:** `{ "data": { "accessToken": "jwt_token", "expiresAt": "...", "tokenType": "Bearer" } }`
+**Success `200 OK`:** 
+```json
+{ "data": {
+    "accessToken":             "eyJ...",
+    "accessTokenExpiresAt":    "2026-05-29T10:15:00Z",
+    "refreshToken":            "...",
+    "refreshTokenExpiresAt":   "2026-06-05T10:00:00Z",
+    "tokenType":               "Bearer"
+} }
+```
 
 **Failures:** 400 `VALIDATION_ERROR`, 401 `INVALID_CREDENTIALS`, 423 `ACCOUNT_LOCKED`.
 
@@ -128,17 +142,42 @@ Implements F2, F4, N3, N4, N5.
 
 ---
 
+### Refresh
+
+`POST /api/v1/auth/refresh`
+
+Rotates the presented refresh token: marks it `ROTATED`, issues a new access + refresh pair, copies `session_started_at` unchanged so the chain expires at the original-login-time + 7 days regardless of how many rotations have happened.
+
+**Authentication:** the refresh token in the body authenticates the call. No `Authorization` header is required — by definition, the access token has expired when refresh is needed. RFC 6749 §6 pattern.
+
+**Request:** `{ "refreshToken": "..." }`.
+
+**Success `200 OK`:** Same shape as `/login`.
+
+**Failures:**
+- 400 `VALIDATION_ERROR` — missing field.
+- 401 `INVALID_REFRESH_TOKEN` — unknown or expired.
+- 401 `REFRESH_TOKEN_REUSE` — token has already been rotated; the entire chain is revoked as a side effect. Client must force re-login.
+
+---
+
 ### Logout
 
 `POST /api/v1/auth/logout`
 
-Writes the token's `jti` claim to `revoked_tokens`. The gateway filter checks this table on every subsequent request. The token is rejected regardless of expiry.
+Marks the presented refresh token as `LOGOUT` in `refresh_tokens`. The access token is **not** revoked — it expires naturally within the access-token window (≤15 min).
 
-**Request:** No body. Token from `Authorization: Bearer` header.
+**Authentication:** the refresh token in the body authenticates the call (RFC 7009 pattern, adapted to JSON). No `Authorization` header is required.
 
-**Idempotent:** Calling logout twice with the same token returns `204 No Content` both times.
+**Request:** `{ "refreshToken": "..." }`.
 
-**Failures:** 401 `UNAUTHORISED` (missing or invalid token).
+**Idempotent + silent on stale tokens.** Logout always returns `204 No Content` regardless of the presented token's state — active, already revoked, rotated, expired, or unknown. The server only revokes the row if it's currently active (`revoked_at IS NULL`); any other state is a silent no-op.
+
+This means a client presenting a **stale** refresh token (e.g., T28 after the chain has rotated to T29) gets a `204` but the session is *not* ended — T29 remains active. Clients must use their **most recent** refresh token to actually end a session. If a session ever appears to "not log out," the client likely has a stale token; the next `/refresh` attempt with that stale token will trigger reuse detection and surface the issue.
+
+This matches OAuth 2.0 RFC 7009 — token revocation revokes a specific token, not a session abstraction. We do not return a distinct status for "already revoked" because that would let an attacker learn whether a stolen token was once valid (a side-channel leak). Same reason `/login` doesn't distinguish "wrong password" from "no such user."
+
+**Failures:** 400 `VALIDATION_ERROR` (missing `refreshToken` in body). No 401 — unknown or stale refresh tokens silently return 204.
 
 Implements F3.
 

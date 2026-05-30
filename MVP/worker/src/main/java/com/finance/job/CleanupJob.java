@@ -30,12 +30,15 @@ public class CleanupJob {
         this.alerter = alerter;
     }
 
-    @Scheduled(cron = "0 0 2 * * *", zone = "UTC")
+    // S4 cleanup. Deleting by expires_at catches both naturally-expired rows
+    // and rotated/logged-out ones — revocation does not shorten expires_at,
+    // so revoked rows age out alongside expired ones.
+    @Scheduled(cron = "0 20 2 * * *", zone = "UTC")
     @Transactional
-    public void deleteExpiredRevokedTokens() {
-        alerter.executeMonitored("deleteExpiredRevokedTokens", () -> {
-            int deleted = jdbc.update("DELETE FROM revoked_tokens WHERE expires_at < ?", clock.instant());
-            log.info("Cleaned up {} expired revoked token(s)", deleted);
+    public void deleteExpiredRefreshTokens() {
+        alerter.executeMonitored("deleteExpiredRefreshTokens", () -> {
+            int deleted = jdbc.update("DELETE FROM refresh_tokens WHERE expires_at < ?", clock.instant());
+            log.info("Cleaned up {} expired refresh token(s)", deleted);
         });
     }
 

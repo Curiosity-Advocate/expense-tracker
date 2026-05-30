@@ -86,7 +86,7 @@ Implements F7–F13.
 ### Security hardening
 
 - **S1 — Split RLS bypass into a dedicated connection pool. ✓ Shipped.** Two Hikari pools (`appDataSource` connecting as `expense_app`, `setupDataSource` connecting as `expense_setup`). V20 revokes `expense_app`'s membership in `expense_setup`, severing the SQL-injection escalation path. The three pre-auth methods (`register`, `login`, `setupNewUser`) route through `setupJdbcTemplate`; `RoleElevationService` is deleted. The security boundary is regression-tested by `PoolIsolationIntegrationTest`. See [ADR-0011](decisions/0011-three-layer-rls-defence.md).
-- **S4 — Short-lived access tokens + refresh tokens.** Replaces the 7-day token with 15-minute access + refresh-token rotation (current revocation table moves to refresh tokens only).
+- **S4 — Short-lived access tokens + refresh-token rotation. ✓ Shipped.** 15-minute access JWTs + 7-day refresh tokens with rotation on every `/refresh`. Reuse detection (presenting a rotated token) cascade-revokes every active chain for the user via `RefreshTokenChainRevoker` in `REQUIRES_NEW`. `session_started_at` is copied unchanged across rotations, capping the chain at the original-login window. V21 creates `refresh_tokens` (single-row-per-issuance, append-only via DB triggers); V22 drops the superseded `revoked_tokens` table. `JwtAuthenticationFilter` is now pure crypto, no DB I/O. See [ADR-0016](decisions/0016-refresh-token-rotation.md).
 - **S5 — Row-level audit trail.** Add `created_by` and `modified_by` UUID columns to every user-scoped table; populate via a JPA `@EntityListeners` + `AuditorAware` reading from `SecurityContext`. Forensic value increases once delegation (D1–D3) lands — answers "who modified Y's expense via a grant" in one query. Doc convention in [data-model.md](architecture/data-model.md) already describes these columns; this item makes the doc true.
 
 ---
@@ -105,12 +105,21 @@ Implements F7–F13.
 - **Async notifications** — `ApplicationEventPublisher` for domain events; observer-pattern polling endpoint (`/suggestions/pending`); FCM push replaces polling for AI suggestion alerts
 - **`@RefreshMaterialisedView` aspect** ([ADR-0008](decisions/0008-aop-materialised-view-refresh.md)) — refresh `mv_*_summary` views after a write commits, falling back to scheduled refresh under load. Today's only refresh is the 02:30 UTC nightly job, so summary endpoints can be up to 12 hours stale.
 
-### Additional auth options (deferred from v2.0)
+### Security enhancements
 
-The v2.0 security work covers what's needed for the threat model — small trusted userbase, RLS-enforced isolation, refresh-token rotation, audit trail. The two items below were originally scoped for v2.0 but deferred because the existing auth (BCrypt + lockout + short-lived tokens + RLS) is adequate for ~10 trusted users. They're kept on the roadmap as resume-signal additions if the project ever opens to a wider userbase.
+The v2.0 security work covers what's needed for the threat model — small trusted userbase, RLS-enforced isolation, refresh-token rotation, audit trail. Items below are deferred to v3.0 because the existing auth (BCrypt + lockout + short-lived tokens + RLS + refresh-token rotation) is adequate for ~10 trusted users. They're kept on the roadmap as resume-signal additions if the project ever opens to a wider userbase.
+
+**Auth options (deferred from v2.0):**
 
 - **TOTP MFA** — second factor for sensitive operations. Self-contained (no external dependencies); demonstrates RFC 6238, secret management, recovery-code UX.
 - **Google OAuth login** — alternative to username/password. Demonstrates OAuth2 client integration, callback/state handling, external identity linking.
+
+**Refresh-token hardening (deferred from S4):**
+
+- **Device/IP binding on refresh tokens** — bind each refresh token to the IP or device fingerprint that issued it. A refresh request from a new IP triggers full re-authentication. Closes the "attacker rotates indefinitely from a different network" gap that the basic S4 rotation does not catch on its own.
+- **Active session UI** — `GET /api/v1/auth/sessions` returns all active refresh tokens for the current user (with last-used time, IP, user agent). `DELETE /api/v1/auth/sessions/{id}` revokes one. Lets users notice and end suspicious sessions from a trusted device without waiting for rotation reuse to fire. Also enables **chain-aware logout** — "log me out of the chain this token came from" — which the current OAuth-style logout deliberately does not do.
+- **Anomaly detection on rotation patterns** — rapid back-to-back refreshes, refresh-then-immediate-failure, or geographically improbable usage triggers an alert (or auto-revokes the chain). Closes the gap where an attacker rotates fast enough to never be the one caught by reuse detection.
+- **Rate limiting on auth endpoints** — Bucket4j (or equivalent) on `/auth/login`, `/auth/refresh`, and `/auth/logout`. The S4 design defers refresh-spam DoS protection here. B8's rate limiting is scoped only to the bank-sync endpoint; the auth endpoints have their own protection profile (per-IP for login, per-token for refresh).
 
 ---
 

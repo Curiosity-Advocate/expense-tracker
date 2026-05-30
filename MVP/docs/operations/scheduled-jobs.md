@@ -12,10 +12,10 @@ All jobs run in UTC. Staggered to avoid resource collision and to ensure cleanup
 
 | Time (UTC) | Job | What it does |
 |---|---|---|
-| Daily 02:00 | `deleteExpiredRevokedTokens` | DELETE FROM `revoked_tokens` WHERE `expires_at < NOW()` |
 | Daily 02:05 | `deleteExpiredIdempotencyKeys` | DELETE FROM `expense_idempotency_keys` WHERE `expires_at < NOW()` |
 | Daily 02:10 | `deleteOldLoginFailures` | DELETE FROM `user_login_failures` WHERE `attempted_at < NOW() - 30 days` |
 | Daily 02:15 | `cleanupJobExecutionState` | Prune `job_execution_state`: SUCCESS > 1 day, ALERTED > 7 days |
+| Daily 02:20 | `deleteExpiredRefreshTokens` | DELETE FROM `refresh_tokens` WHERE `expires_at < NOW()` |
 | Daily 02:30 | `refresh` (materialised views) | `REFRESH MATERIALIZED VIEW CONCURRENTLY` for both summary views |
 | Dec 1 01:00 | `createNextYearPartition` | `CREATE TABLE IF NOT EXISTS expenses_<Y+1> PARTITION OF expenses ...` |
 | Jan 1 02:00 | `archiveOldPartitions` | `ALTER TABLE expenses DETACH PARTITION IF EXISTS expenses_<Y-5>` |
@@ -47,7 +47,7 @@ Spring's six-field cron format:
 
 ## Why these jobs are needed
 
-**Expired revoked tokens cleanup (F36).** Every logout writes a row to `revoked_tokens`. The auth filter checks this table on every request. Rows where `expires_at < NOW()` would be rejected by expiry anyway — keeping them only inflates the table and slows the lookup. Cleanup keeps the table small.
+**Expired refresh tokens cleanup (F36, S4).** Every login + every refresh writes a row to `refresh_tokens`. The table is single-source-of-truth for rotation chains. Rows where `expires_at < NOW()` are past the 7-day max-session cap and cannot be rotated further; the DELETE catches both naturally-expired rows and rotated/logged-out rows (revocation doesn't shorten `expires_at`, so revoked rows age out alongside expired ones). Cleanup keeps the table bounded. Superseded `deleteExpiredRevokedTokens` (v1.0) — see [ADR-0009](../decisions/0009-jwt-revocation-via-jti-table.md).
 
 **Expired idempotency keys cleanup (F36).** Same pattern. The keys have a 24-hour TTL; past that they cannot do anything useful, but they take space. Cleanup keeps lookups fast.
 
@@ -59,10 +59,10 @@ Spring's six-field cron format:
 
 All jobs are idempotent by design. The mechanism is to use a fixed condition that naturally includes anything previously targeted.
 
-Concrete example — `deleteExpiredRevokedTokens`:
+Concrete example — `deleteExpiredRefreshTokens`:
 
 ```sql
-DELETE FROM revoked_tokens WHERE expires_at < NOW();
+DELETE FROM refresh_tokens WHERE expires_at < NOW();
 ```
 
 The condition `expires_at < NOW()` is independent of run history. If yesterday's run successfully deleted some rows, today's run includes them in its conceptual target set — but they are already gone, so the DELETE is a no-op for them. The condition never changes between runs; re-running either does the work or has no effect.
@@ -107,7 +107,7 @@ alerts:
 Structured JSON logs continue to capture every attempt (the alerter logs `attempt 1/5 failed`, `attempt 2/5 failed`, ... `failed all 5 attempts`), so the email is a notification on top of the log trail, not a replacement for it.
 
 ```json
-{"ts":"2026-05-19T02:00:00.123+0000","level":"INFO","logger":"c.f.job.CleanupJob","msg":"Cleaned up 42 expired revoked token(s)"}
+{"ts":"2026-05-19T02:20:00.123+0000","level":"INFO","logger":"c.f.job.CleanupJob","msg":"Cleaned up 42 expired refresh token(s)"}
 ```
 
 ---

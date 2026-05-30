@@ -26,9 +26,9 @@ public class JwtService {
         this.clock = clock;
     }
 
-    public String generateToken(UUID userId, String username) {
+    public String generateAccessToken(UUID userId, String username) {
         Instant now    = Instant.now(clock);
-        Instant expiry = now.plus(properties.expiryDays(), ChronoUnit.DAYS);
+        Instant expiry = now.plus(properties.accessTokenExpiryMinutes(), ChronoUnit.MINUTES);
 
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())          // jti — unique per token

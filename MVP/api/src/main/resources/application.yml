@@ -49,7 +49,11 @@ spring:
 app:
   jwt:
     secret: ${JWT_SECRET}
-    expiry-days: 7
+    # Access tokens are stateless JWTs; refresh tokens are opaque + DB-tracked.
+    # 15-minute access keeps the stolen-token window short; 7-day refresh
+    # matches the v1.0 worst-case window so this is no worse on the slowest path.
+    access-token-expiry-minutes: 15
+    refresh-token-expiry-days: 7
 
 management:
   endpoints:

@@ -62,22 +62,36 @@ Indexes:
 
 Maps to F4.
 
-### `revoked_tokens`
+### `revoked_tokens` (removed in V22)
 
-Stores the `jti` (JWT ID) of tokens that have been explicitly revoked via logout. The auth filter checks this table on every request — if the `jti` appears here, the token is rejected even if it has not expired.
+v1.0's per-request JWT revocation table. Replaced by `refresh_tokens` + 15-minute access tokens in S4. See [ADR-0009](../decisions/0009-jwt-revocation-via-jti-table.md) (superseded) for the v1.0 design and reasoning for removal.
+
+### `refresh_tokens`
+
+Stores one row per refresh token issuance. The same row is both the "this token was issued" record and (once `revoked_at` / `revoke_reason` are populated) the revocation record. Strict append-only semantics: only `revoked_at` and `revoke_reason` may transition, and only NULL → set once. Enforced by DB triggers `enforce_immutability_except` and `enforce_set_once_column` (both defined in V21 and reusable on future tables).
 
 ```
-token_jti   UUID        PRIMARY KEY                          (JWT ID from logged-out token)
-user_id     UUID        NOT NULL REFERENCES users(id)
-revoked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-expires_at  TIMESTAMPTZ NOT NULL                             (cleanup trigger)
+token_hash         VARCHAR(64) PRIMARY KEY                       (SHA-256 hex of the raw token)
+user_id            UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE
+session_started_at TIMESTAMPTZ NOT NULL                          (max-session anchor — copied unchanged across rotations)
+expires_at         TIMESTAMPTZ NOT NULL                          (= session_started_at + 7 days; rotation does not extend)
+issued_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+rotated_from       VARCHAR(64) NULL REFERENCES refresh_tokens(token_hash)  (chain link to predecessor)
+revoked_at         TIMESTAMPTZ NULL                              (set once, never unset)
+revoke_reason      VARCHAR(20) NULL                              (CHECK: ROTATED | LOGOUT | REUSE_DETECTED — set with revoked_at)
 ```
 
 Indexes:
-- `idx_revoked_tokens_jti` — fast lookup on every authenticated request
-- `idx_revoked_tokens_expires` — cleanup job deletes rows where `expires_at <= NOW()`
+- `idx_refresh_tokens_user_active` — partial on `(user_id)` `WHERE revoked_at IS NULL`; used by chain-revocation lookups on reuse detection
+- `idx_refresh_tokens_expires_at` — used by the nightly cleanup job
 
-Compromise of this table reveals identifiers, not valid tokens. Maps to F3, F36, N5.
+**RLS.** Standard RESTRICTIVE policy keyed on `user_id = current_setting('app.current_user_id')::uuid`. The `/refresh` endpoint sets `app.current_user_id` from the user_id stored on the refresh-token row before issuing the rotation.
+
+**Lifecycle.** Login creates the first row (`rotated_from = NULL`). Each `/refresh` request marks the presented row as revoked with `revoke_reason = ROTATED` and inserts a new row with `rotated_from = <previous hash>` and the same `session_started_at` (so `expires_at` cannot extend past the original login + 7 days). Logout sets `revoke_reason = LOGOUT`. Presenting a token whose `revoked_at IS NOT NULL` triggers reuse detection: every active row for that `user_id` is revoked with `revoke_reason = REUSE_DETECTED`, forcing full re-authentication.
+
+**Why hash-only storage.** Refresh tokens are 256-bit random values — same reasoning as `sudo_tokens` below. SHA-256 hex (64 chars) at rest; raw token never persisted. Compromise of this table reveals identifiers, not valid tokens.
+
+Maps to F3, F36, N5.
 
 ### `sudo_tokens` (deferred to v2.0)
 
@@ -414,7 +428,7 @@ Maps to F25, F31, F37, N16, N17, N18.
 
 ```mermaid
 erDiagram
-    users ||--o{ revoked_tokens : revokes
+    users ||--o{ refresh_tokens : has_sessions
     users ||--o{ user_login_failures : tracks
     users ||--o{ bank_accounts : owns
     users ||--o{ categories : creates

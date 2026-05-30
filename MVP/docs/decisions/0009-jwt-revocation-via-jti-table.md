@@ -2,7 +2,7 @@
 
 > **Context:** Expands [overview.md §6](../overview.md#6-how-users-interact-with-the-system). Driven by: F3, N5.
 
-**Status:** Accepted. Adopted in v1.0.
+**Status:** Superseded by S4 (V21 + V22, 2026-05-29). v1.0's per-request `jti` revocation check is replaced by 15-minute access tokens + refresh-token rotation. Access tokens are no longer tracked individually; compromise detection moves to the refresh-token side (see [refresh_tokens](../architecture/data-model.md#refresh_tokens) and the S4 entry in [roadmap.md](../roadmap.md)). The `revoked_tokens` table was dropped in V22. This ADR is retained as historical record of the v1.0 design.
 
 ---
 

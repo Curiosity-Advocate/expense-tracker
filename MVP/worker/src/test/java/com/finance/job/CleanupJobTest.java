@@ -40,15 +40,15 @@ class CleanupJobTest {
     }
 
     @Test
-    void deleteExpiredRevokedTokens_usesClockInstant_asCutoff() {
-        Instant fixed = Instant.parse("2026-05-25T02:00:00Z");
+    void deleteExpiredRefreshTokens_usesClockInstant_asCutoff() {
+        Instant fixed = Instant.parse("2026-05-25T02:20:00Z");
         when(clock.instant()).thenReturn(fixed);
         when(clock.getZone()).thenReturn(ZoneOffset.UTC);
 
-        job.deleteExpiredRevokedTokens();
+        job.deleteExpiredRefreshTokens();
 
         verify(jdbc).update(
-                eq("DELETE FROM revoked_tokens WHERE expires_at < ?"),
+                eq("DELETE FROM refresh_tokens WHERE expires_at < ?"),
                 eq(fixed));
     }
 
@@ -67,13 +67,13 @@ class CleanupJobTest {
 
     // Sanity: bare anyString matcher proves only one jdbc.update call per invocation
     @Test
-    void deleteExpiredRevokedTokens_callsJdbcUpdateExactlyOnce() {
-        when(clock.instant()).thenReturn(Instant.parse("2026-05-25T02:00:00Z"));
+    void deleteExpiredRefreshTokens_callsJdbcUpdateExactlyOnce() {
+        when(clock.instant()).thenReturn(Instant.parse("2026-05-25T02:20:00Z"));
         when(clock.getZone()).thenReturn(ZoneOffset.UTC);
 
-        job.deleteExpiredRevokedTokens();
+        job.deleteExpiredRefreshTokens();
 
-        verify(jdbc).update(anyString(), eq(Instant.parse("2026-05-25T02:00:00Z")));
+        verify(jdbc).update(anyString(), eq(Instant.parse("2026-05-25T02:20:00Z")));
     }
 
     // v1.1 #2 — login-failure cleanup uses (clock.instant() - 30 days) as the cutoff.

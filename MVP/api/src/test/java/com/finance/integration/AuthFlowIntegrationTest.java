@@ -77,13 +77,24 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void login_happyPath_returnsTokenPair() {
+    void login_happyPath_returnsAccessAndRefreshTokenPair() {
         authService.register(new RegisterCommand("dave", "dave@example.com", "correct_password"));
 
         TokenPair pair = authService.login(new LoginCommand("dave", "correct_password"));
 
         assertThat(pair.accessToken()).isNotBlank();
+        assertThat(pair.refreshToken()).isNotBlank();
+        assertThat(pair.accessTokenExpiresAt()).isAfter(Instant.now());
+        assertThat(pair.refreshTokenExpiresAt()).isAfter(pair.accessTokenExpiresAt());
         assertThat(pair.tokenType()).isEqualTo("Bearer");
+
+        // Refresh token row landed with rotated_from = NULL (start of chain).
+        Integer rowCount = appJdbc.queryForObject(
+                "SELECT COUNT(*) FROM refresh_tokens " +
+                "WHERE user_id IN (SELECT id FROM users WHERE username = 'dave') " +
+                "  AND rotated_from IS NULL AND revoked_at IS NULL",
+                Integer.class);
+        assertThat(rowCount).isEqualTo(1);
     }
 
     @Test
