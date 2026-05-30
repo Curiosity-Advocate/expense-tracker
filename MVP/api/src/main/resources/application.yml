@@ -6,13 +6,26 @@ spring:
     name: expense-tracker-api
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_db}
-    username: ${DB_USERNAME}
-    password: ${DB_APP_PASSWORD}
-    hikari:
+    # Two pools — see ADR-0011 and DataSourceConfig.java.
+    # `app` is the primary pool used by every authenticated endpoint. RLS is
+    # enforced on this role; the RlsSessionAspect sets app.current_user_id.
+    # `setup` is a dedicated pool for register / login / setupNewUser only.
+    # The expense_setup role has BYPASSRLS — it must never reach any other
+    # code path. Maximum pool size capped at 3 because only three low-frequency
+    # methods use it.
+    app:
+      jdbc-url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_db}
+      username: ${DB_USERNAME}
+      password: ${DB_APP_PASSWORD}
       # Forces every new pool connection to UTC, regardless of DB or role defaults.
       # Defence-in-depth — V16 also sets the DB-level default.
       connection-init-sql: "SET TIME ZONE 'UTC'"
+    setup:
+      jdbc-url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_db}
+      username: expense_setup
+      password: ${DB_SETUP_PASSWORD}
+      connection-init-sql: "SET TIME ZONE 'UTC'"
+      maximum-pool-size: 3
 
   jpa:
     open-in-view: false
@@ -26,6 +39,12 @@ spring:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:expense_db}
     user: ${DB_SUPERUSER_USERNAME}
     password: ${DB_SUPERUSER_PASSWORD}
+    placeholders:
+      # Resolved at migration time. V20 uses these to set the expense_setup
+      # role's password and grant CONNECT on the actual database, without
+      # hardcoding either value into the migration file.
+      db_setup_password: ${DB_SETUP_PASSWORD}
+      db_name: ${DB_NAME:expense_db}
 
 app:
   jwt:

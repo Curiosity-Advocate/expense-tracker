@@ -85,10 +85,9 @@ Implements F7–F13.
 
 ### Security hardening
 
-- **Split RLS bypass into a dedicated connection pool.** v1.0 grants `expense_app` membership in `expense_setup` so the app role can `SET LOCAL ROLE` for pre-auth operations (register, login, default user setup). A successful SQL injection through `expense_app` could escalate by running the same `SET LOCAL ROLE expense_setup` statement. Move to two separate Hikari pools — one connecting as `expense_app`, one as `expense_setup` — so the app role cannot escalate even if compromised. See [ADR-0011](decisions/0011-three-layer-rls-defence.md).
-- **TOTP MFA** — second factor for sensitive operations.
-- **Google OAuth login** — alternative to username/password.
-- **Short-lived access tokens + refresh tokens** — replaces the 7-day token with 15-minute access + refresh-token rotation (current revocation table moves to refresh tokens only).
+- **S1 — Split RLS bypass into a dedicated connection pool. ✓ Shipped.** Two Hikari pools (`appDataSource` connecting as `expense_app`, `setupDataSource` connecting as `expense_setup`). V20 revokes `expense_app`'s membership in `expense_setup`, severing the SQL-injection escalation path. The three pre-auth methods (`register`, `login`, `setupNewUser`) route through `setupJdbcTemplate`; `RoleElevationService` is deleted. The security boundary is regression-tested by `PoolIsolationIntegrationTest`. See [ADR-0011](decisions/0011-three-layer-rls-defence.md).
+- **S4 — Short-lived access tokens + refresh tokens.** Replaces the 7-day token with 15-minute access + refresh-token rotation (current revocation table moves to refresh tokens only).
+- **S5 — Row-level audit trail.** Add `created_by` and `modified_by` UUID columns to every user-scoped table; populate via a JPA `@EntityListeners` + `AuditorAware` reading from `SecurityContext`. Forensic value increases once delegation (D1–D3) lands — answers "who modified Y's expense via a grant" in one query. Doc convention in [data-model.md](architecture/data-model.md) already describes these columns; this item makes the doc true.
 
 ---
 
@@ -105,6 +104,13 @@ Implements F7–F13.
 - **Auto-apply mode** (optional per user) — configurable threshold for accepting AI suggestions without user confirmation
 - **Async notifications** — `ApplicationEventPublisher` for domain events; observer-pattern polling endpoint (`/suggestions/pending`); FCM push replaces polling for AI suggestion alerts
 - **`@RefreshMaterialisedView` aspect** ([ADR-0008](decisions/0008-aop-materialised-view-refresh.md)) — refresh `mv_*_summary` views after a write commits, falling back to scheduled refresh under load. Today's only refresh is the 02:30 UTC nightly job, so summary endpoints can be up to 12 hours stale.
+
+### Additional auth options (deferred from v2.0)
+
+The v2.0 security work covers what's needed for the threat model — small trusted userbase, RLS-enforced isolation, refresh-token rotation, audit trail. The two items below were originally scoped for v2.0 but deferred because the existing auth (BCrypt + lockout + short-lived tokens + RLS) is adequate for ~10 trusted users. They're kept on the roadmap as resume-signal additions if the project ever opens to a wider userbase.
+
+- **TOTP MFA** — second factor for sensitive operations. Self-contained (no external dependencies); demonstrates RFC 6238, secret management, recovery-code UX.
+- **Google OAuth login** — alternative to username/password. Demonstrates OAuth2 client integration, callback/state handling, external identity linking.
 
 ---
 

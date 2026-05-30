@@ -36,16 +36,26 @@ Enforce data isolation at **three independent layers**:
 
 ## Setup role escape hatch
 
-Pre-authentication operations — register, login, and default user setup — cannot satisfy the `user_isolation` policy because no `UserPrincipal` exists yet when they run. With a strict policy applied to all commands, registration's INSERT would be rejected (new row's `id != NULL::uuid`), login's SELECT would return no rows, and `existsByUsernameOrEmail` would always report "no duplicates" even when duplicates exist.
+Pre-authentication operations — register, login, and default user setup — cannot satisfy the `user_isolation` policy because no `UserPrincipal` exists yet when they run. With a strict policy applied to all commands, registration's INSERT would be rejected (new row's `id != NULL::uuid`), login's SELECT would return no rows, and the username/email existence check would always report "no duplicates" even when duplicates exist.
 
-To allow these specific operations through without weakening the user-facing isolation:
+To allow these specific operations through without weakening the user-facing isolation, the application maintains **two Hikari connection pools** (adopted in v2.0 — see "Evolution" below for the v1.0 design this replaced):
 
-- A dedicated DB role `expense_setup` exists (created in V17) with `BYPASSRLS` and `NOLOGIN`. It cannot be connected to externally — it has no password and no login capability — so the only way to use it is from within an already-authenticated `expense_app` connection that has been granted membership.
-- The application's three setup methods — `PostgresAuthService.register()`, `PostgresAuthService.login()`, `DefaultUserSetupService.setupNewUser()` — call `RoleElevationService.elevateToSetupRole()` at the start of their transaction. This issues `SET LOCAL ROLE expense_setup`. Non-DB work (password hashing) runs first so the elevated SQL window is as small as possible.
-- `SET LOCAL` scopes the role change to the current transaction. It auto-reverts at COMMIT/ROLLBACK, so HikariCP's connection reuse cannot leak the elevation into another caller's transaction (same mechanism as Layer 2 above).
-- The original `user_isolation` policy is untouched. No permissive `WITH CHECK (TRUE)` holes. Authenticated operations stay strictly isolated.
+- **`appDataSource`** — the `@Primary` pool. Connects as `expense_app`. RLS-enforced. Used by every authenticated endpoint and by `PostgresAuthService.logout()` (which has a JWT, so a user context exists).
+- **`setupDataSource`** — a dedicated pool capped at `maximumPoolSize: 3`. Connects as `expense_setup`, a `LOGIN BYPASSRLS` role with `GRANT`s limited to `users`, `bank_accounts`, and `user_login_failures`. Reached only through `setupJdbcTemplate` (a `NamedParameterJdbcTemplate` bound to this pool).
 
-**Known trade-off (deferred to v2.0).** Because `expense_app` is a member of `expense_setup`, a SQL injection through the app role could also escalate by running the same `SET LOCAL ROLE` statement. The textbook-secure version is two separate Hikari connection pools — one connecting as `expense_app`, the other as `expense_setup` — so the app role cannot escalate even if compromised. This refactor is on the [v2.0 roadmap](../roadmap.md#security-hardening) under "Security hardening".
+The three setup methods — `PostgresAuthService.register()`, `PostgresAuthService.login()`, `DefaultUserSetupService.setupNewUser()` — are annotated `@Transactional(DataSourceConfig.SETUP_TX_MANAGER)`. Spring opens their transaction on `setupTransactionManager` (a `DataSourceTransactionManager` wrapping `setupDataSource`). Their SQL runs through `setupJdbcTemplate` and never touches the app pool. The bean wiring lives in `api/.../config/DataSourceConfig.java`.
+
+`expense_app` no longer holds membership in `expense_setup` (V20 revokes it). A SQL injection through the app pool can therefore not issue `SET LOCAL ROLE expense_setup` to escalate — the role membership the v1.0 design depended on no longer exists. `RlsSessionAspect` reads the `@Transactional` qualifier and returns early when the method is on `setupTransactionManager`, so the aspect never runs on the setup pool's transactions.
+
+The `user_isolation` policy is untouched. No permissive `WITH CHECK (TRUE)` holes. Authenticated operations stay strictly isolated.
+
+The security boundary is regression-tested by `PoolIsolationIntegrationTest` (`api/src/test/java/com/finance/integration/`), which verifies: (a) `expense_app` cannot `SET LOCAL ROLE expense_setup` (Postgres SQLState `42501`), (b) `pg_has_role(current_user, 'expense_setup', 'MEMBER')` returns `false` on the app pool, (c) the setup pool can INSERT without an `app.current_user_id` set, and (d) the app pool returns zero rows without one.
+
+### Evolution
+
+**v1.0 design (superseded).** A single Hikari pool connecting as `expense_app`. `expense_setup` was `NOLOGIN`; the three setup methods called `RoleElevationService.elevateToSetupRole()` to issue `SET LOCAL ROLE expense_setup` at the start of their transaction. This worked but `expense_app` held membership in `expense_setup`, meaning any SQL injection through the app role could escalate by issuing the same statement. The trade-off was acknowledged at the time and scheduled for v2.0.
+
+**v2.0 fix (S1, V20).** Two pools, `RoleElevationService` deleted, membership revoked. The textbook-secure version that the v1.0 ADR pointed to as future work.
 
 ## Alternatives considered
 
