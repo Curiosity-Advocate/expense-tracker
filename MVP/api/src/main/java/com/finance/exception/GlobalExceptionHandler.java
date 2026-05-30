@@ -130,6 +130,26 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.UNPROCESSABLE_ENTITY, "INVALID_TARGET_SCOPE", ex.getMessage());
     }
 
+    // ── Access grants (D1) ────────────────────────────────────────────────────
+
+    @ExceptionHandler(GrantNotFoundException.class)
+    public ResponseEntity<?> handleGrantNotFound(GrantNotFoundException ex) {
+        return error(HttpStatus.NOT_FOUND, "GRANT_NOT_FOUND", ex.getMessage());
+    }
+
+    @ExceptionHandler(GranteeNotDiscoverableException.class)
+    public ResponseEntity<?> handleGranteeNotDiscoverable(GranteeNotDiscoverableException ex) {
+        // 404 (not 422) so unknown / non-discoverable usernames are
+        // indistinguishable from "no such user" — same enumeration-defence
+        // rationale as InvalidCredentials.
+        return error(HttpStatus.NOT_FOUND, "GRANTEE_NOT_FOUND", ex.getMessage());
+    }
+
+    @ExceptionHandler(SelfGrantNotAllowedException.class)
+    public ResponseEntity<?> handleSelfGrant(SelfGrantNotAllowedException ex) {
+        return error(HttpStatus.UNPROCESSABLE_ENTITY, "SELF_GRANT_NOT_ALLOWED", ex.getMessage());
+    }
+
     // ── Catch-all ─────────────────────────────────────────────────────────────
 
     @ExceptionHandler(Exception.class)

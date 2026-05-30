@@ -98,6 +98,41 @@ Indexes:
 
 Maps to F3, F36, N5.
 
+### `access_grants`
+
+Records that user A has granted user B the ability to act on A's data via the delegation mechanism (D1, V24). D2 (sudo tokens) and D3 (gateway filter) are required for grants to actually do anything at runtime — until they ship, grants exist as records but cannot be used.
+
+```
+id            UUID        PRIMARY KEY
+grantor_id    UUID        NOT NULL REFERENCES users(id)
+grantee_id    UUID        NOT NULL REFERENCES users(id)
+access_level  VARCHAR(20) NOT NULL                        (CHECK in: READ_WRITE — v2.0 single level; future migrations add READ_ONLY etc.)
+expires_at    TIMESTAMPTZ NOT NULL                        (NOW() + expiresInDays, bounded 1-30 at the service layer)
+revoked_at    TIMESTAMPTZ NULL                            (soft revoke; grants are never physically deleted)
+```
+
+Plus the standard four audit columns (`created_at`, `updated_at`, `created_by`, `modified_by`).
+
+**Constraints:**
+- `chk_no_self_grant` — `grantor_id <> grantee_id`. DB-enforced; service layer rejects earlier with a friendlier error.
+- `chk_expires_in_future` — `expires_at > created_at`. Backstop against clock skew at insert.
+
+**RLS policy — dual-clause.** Unlike every other tenant-scoped table, `access_grants` has two user references. The policy matches if the current user is *either* role:
+
+```sql
+USING (grantor_id = current_setting('app.current_user_id')::uuid
+    OR grantee_id = current_setting('app.current_user_id')::uuid)
+```
+
+This is what lets the grantee list grants given *to* them. The USING clause also acts as `WITH CHECK` on INSERT, bounding creates to grants where the current user is party.
+
+**Indexes:**
+- `idx_access_grants_grantor_active` — partial on `(grantor_id) WHERE revoked_at IS NULL`. Used by "my active grants given."
+- `idx_access_grants_grantee_active` — partial on `(grantee_id) WHERE revoked_at IS NULL`. Used by "my active grants received."
+- `idx_access_grants_expires_at` — used by the cleanup cron (added with D2/D3 cleanup work).
+
+Maps to F7, F8, F9.
+
 ### `sudo_tokens` (deferred to v2.0)
 
 ```
@@ -439,6 +474,8 @@ erDiagram
     users ||--o{ categories : creates
     users ||--o{ expenses : records
     users ||--o{ expense_targets : sets
+    users ||--o{ access_grants : grants
+    users ||--o{ access_grants : receives
     banks ||--o{ bank_accounts : referenced_by
     bank_accounts ||--o{ expenses : associated_with
     categories ||--o{ expense_categories : weighted_in

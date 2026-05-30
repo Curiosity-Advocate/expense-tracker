@@ -77,11 +77,9 @@ Implements F4 (extended), N6, N7, N8.
 
 Implements F7–F13.
 
-- `POST /api/v1/users/me/access-grants` — create grant with `granteeUsername`, `accessLevel`, `expiresInDays`
-- `GET /api/v1/users/me/access-grants` — list grants
-- `DELETE /api/v1/users/me/access-grants/{grantId}` — revoke early
-- `sudo_tokens` table (SHA-256 hashed) — step-up authentication
-- Gateway filter handles `asUserId` query parameter on expense endpoints; scope restricted to expense endpoints only
+- **D1 — access_grants table + CRUD API. ✓ Shipped.** V24 creates `access_grants` with dual-clause RLS (grantor_id OR grantee_id matches current user), DB-enforced no-self-grant CHECK, audit columns via the S5 trigger. Three endpoints under `/api/v1/users/me/access-grants` — POST/GET/DELETE — with grantee discoverability gate, 1–30 day expiry bound, and indistinguishable-error responses to prevent username enumeration. Grants exist as records but **are not yet usable for delegation** pending D2 (sudo tokens) and D3 (gateway filter). See [api-contract.md §Access grants](architecture/api-contract.md).
+- **D2 — `sudo_tokens` + step-up auth.** SHA-256-hashed short-lived secret B must present alongside an active D1 grant to actually exercise the delegation. Same hash-only storage pattern as `refresh_tokens` (S4).
+- **D3 — Gateway filter for `asUserId`.** Intercepts requests with `?asUserId=<grantor>` plus a sudo token, validates against `access_grants` + `sudo_tokens`, then sets `app.current_user_id = grantor` and `app.acting_user_id = delegate` (the latter is the S5 forward-compat hook). Scope restricted to expense endpoints only.
 
 ### Security hardening
 

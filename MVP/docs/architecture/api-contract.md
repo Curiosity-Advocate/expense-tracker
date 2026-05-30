@@ -212,15 +212,49 @@ Implements F6.
 
 ---
 
-### Access grants (deferred to v2.0)
+### Access grants (D1)
 
-The README designs these endpoints but they are not implemented in v1.0. See [../roadmap.md](../roadmap.md).
+Grants persist the "user A allows user B to act on A's data temporarily" record. **D1 ships the persistence and CRUD API only**; grants are not yet usable for actual delegation. D2 (sudo tokens) and D3 (the `asUserId` gateway filter) are required for B to actually exercise the access.
 
-- `GET /api/v1/users/me/access-grants` — list grants given to others (F10)
-- `POST /api/v1/users/me/access-grants` — create a grant (F7, F8)
-- `DELETE /api/v1/users/me/access-grants/{grantId}` — revoke a grant early (F9)
+#### Create
 
-Delegation is explicit per request — caller passes `asUserId=<grantor-uuid>` as a query parameter on expense endpoints, accompanied by a sudo token (F11). Scope limited to expense endpoints only (F12). Expiry enforced by the gateway filter at request time (F13).
+`POST /api/v1/users/me/access-grants`
+
+The current user (from JWT) becomes the grantor.
+
+**Request:** `{ "granteeUsername": "...", "accessLevel": "READ_WRITE", "expiresInDays": 7 }`
+
+- `granteeUsername` — must resolve to a user with `is_discoverable = TRUE`
+- `accessLevel` — only `READ_WRITE` accepted in v2.0 (CHECK constraint reserves space for future levels)
+- `expiresInDays` — 1–30 inclusive
+
+**Success `201 Created`:** `{ "data": { "id": "...", "grantorId": "...", "grantorUsername": "...", "granteeId": "...", "granteeUsername": "...", "accessLevel": "READ_WRITE", "expiresAt": "...", "revokedAt": null } }`
+
+**Failures:**
+- 400 `VALIDATION_ERROR` — missing fields or `expiresInDays` out of range
+- 404 `GRANTEE_NOT_FOUND` — unknown username OR `is_discoverable = FALSE`. Indistinguishable to prevent enumeration
+- 422 `SELF_GRANT_NOT_ALLOWED` — grantor == grantee
+
+#### List
+
+`GET /api/v1/users/me/access-grants`
+
+Returns every grant the user is party to — both grants given (as grantor) and grants received (as grantee). The RLS dual-clause policy on `access_grants` does the filtering. Clients can sort/group client-side by comparing each grant's `grantorId` / `granteeId` against their own user id.
+
+**Success `200 OK`:** `{ "data": [ { ...AccessGrantResponse... }, ... ] }`
+
+#### Revoke
+
+`DELETE /api/v1/users/me/access-grants/{grantId}`
+
+Soft-revoke. Sets `revoked_at = NOW()`. Allowed for either the grantor (cancelling the grant they made) or the grantee (declining the access they were given). Idempotent — re-revoking a grant is a silent 204.
+
+**Success `204 No Content`**
+
+**Failures:**
+- 404 `GRANT_NOT_FOUND` — the grant id doesn't exist, OR the current user isn't party to it (RLS hides it; same error to prevent enumeration)
+
+Implements F7, F8, F9, F10. F11 (sudo tokens) lands in D2; F12, F13 (gateway filter) in D3.
 
 ---
 
