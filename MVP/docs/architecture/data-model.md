@@ -16,12 +16,17 @@ These apply to every table without restatement.
 
 **Timestamps.** All `TIMESTAMPTZ` stored in UTC. Display conversion is the client's responsibility.
 
-**Audit columns.** Every table has `created_at`, `updated_at`, `created_by`, `modified_by`. `created_*` are never updatable. `modified_*` update automatically via DB trigger on every UPDATE.
+**Audit columns.** Every user-scoped business table has `created_at`, `updated_at`, `created_by`, `modified_by`. The `_at` columns are managed by DB defaults + triggers; the `_by` columns are managed by the `set_audit_user` trigger added in V23. Security / system-infrastructure tables (`user_login_failures`, `refresh_tokens`, `expense_idempotency_keys`, `banks`, `partition_registry`, `job_execution_state`) skip the `_by` columns — see [ADR-0017](../decisions/0017-row-level-audit-trail.md) for which tables and why.
 
 **Timestamp ownership rule:**
 
 - `created_at` — set by `DEFAULT NOW()` on insert. A DB trigger (`lock_created_at`) prevents any update. Hibernate maps it with `updatable = false` as a second layer of defence.
 - `updated_at` — set by `DEFAULT NOW()` on insert. A DB trigger (`set_updated_at`) overwrites it on every update automatically. Hibernate maps it with `insertable = false, updatable = false` — Java never touches this field. Accurate even if someone bypasses the application and runs SQL directly.
+
+**User-ownership rule:**
+
+- `created_by` — set on INSERT by the `set_audit_user` trigger to `current_setting('app.acting_user_id')` if delegation is active, else `current_setting('app.current_user_id')`, else NULL (pre-auth setup-pool writes). A separate `lock_created_by` trigger prevents updates.
+- `modified_by` — set on INSERT to the same value as `created_by`. On UPDATE, refreshed to the current actor; if no actor is in scope, the previous `modified_by` is preserved (guards future scheduled jobs from erasing audit history).
 
 **Soft deletes.** `deleted_at TIMESTAMPTZ NULL`. NULL means active. Physical deletion never happens. See [ADR-0003](../decisions/0003-soft-delete-only.md).
 
