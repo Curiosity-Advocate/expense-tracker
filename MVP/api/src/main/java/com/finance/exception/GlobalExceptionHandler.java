@@ -150,6 +150,21 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.UNPROCESSABLE_ENTITY, "SELF_GRANT_NOT_ALLOWED", ex.getMessage());
     }
 
+    // ── Sudo tokens (D2) ──────────────────────────────────────────────────────
+    // Both errors return 401 with opaque messages — collapsing all four
+    // grant-failure conditions (unknown / not yours / revoked / expired) into
+    // one error code prevents enumeration of grant state via probing.
+
+    @ExceptionHandler(GrantNotUsableException.class)
+    public ResponseEntity<?> handleGrantNotUsable(GrantNotUsableException ex) {
+        return error(HttpStatus.UNAUTHORIZED, "GRANT_NOT_USABLE", ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidSudoTokenException.class)
+    public ResponseEntity<?> handleInvalidSudoToken(InvalidSudoTokenException ex) {
+        return error(HttpStatus.UNAUTHORIZED, "INVALID_SUDO_TOKEN", ex.getMessage());
+    }
+
     // ── Catch-all ─────────────────────────────────────────────────────────────
 
     @ExceptionHandler(Exception.class)

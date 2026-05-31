@@ -258,6 +258,33 @@ Implements F7, F8, F9, F10. F11 (sudo tokens) lands in D2; F12, F13 (gateway fil
 
 ---
 
+### Sudo tokens (D2)
+
+Step-up authentication. The grantee mints a sudo token by re-entering their password; the raw token is returned once and must accompany every `?asUserId=<grantor>` request handled by D3's gateway filter. D2 ships the mint endpoint and the verify primitive (for D3); D3 plugs into verify when it lands.
+
+#### Mint
+
+`POST /api/v1/auth/sudo-tokens`
+
+**Authentication:** Bearer access token required (`/api/v1/auth/sudo-tokens` is the one authenticated endpoint under `/auth/**`; the rest of `/auth/**` is `permitAll`). The body's password re-entry is the second factor on top of the JWT.
+
+**Request:** `{ "grantId": "uuid", "password": "..." }`
+
+**Success `201 Created`:** `{ "data": { "sudoToken": "...", "expiresAt": "..." } }` — raw token shown once; only its SHA-256 hash is persisted.
+
+**Failures:**
+- 400 `VALIDATION_ERROR` — missing fields
+- 401 `INVALID_CREDENTIALS` — wrong password
+- 401 `GRANT_NOT_USABLE` — grant doesn't exist, isn't the current user's, is revoked, or is expired. The four conditions are indistinguishable from the caller's perspective (enumeration defence)
+
+#### Verify _(internal — used by D3 when it ships)_
+
+`SudoTokenService.verify(rawToken, granteeId)` returns `SudoTokenVerification(grantId, grantorId, granteeId)` if the token is valid and its underlying grant is still active. Throws `InvalidSudoTokenException` for unknown, expired, or revoked-grant tokens. Not exposed as an HTTP endpoint; called by D3's filter directly.
+
+Implements F11.
+
+---
+
 ## Expenses and Categories
 
 ### Create manual expense

@@ -7,8 +7,8 @@ import com.finance.domain.RegisteredUser;
 import com.finance.domain.TokenPair;
 import com.finance.exception.InvalidRefreshTokenException;
 import com.finance.exception.RefreshTokenReuseException;
-import com.finance.security.RefreshTokenGenerator;
-import com.finance.security.RefreshTokenGenerator.GeneratedRefreshToken;
+import com.finance.security.SecureTokenGenerator;
+import com.finance.security.SecureTokenGenerator.GeneratedToken;
 import com.finance.service.AuthService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RefreshTokenIntegrationTest extends IntegrationTestBase {
 
     @Autowired AuthService authService;
-    @Autowired RefreshTokenGenerator tokenGenerator;
+    @Autowired SecureTokenGenerator tokenGenerator;
     @Autowired NamedParameterJdbcTemplate setupJdbcTemplate;
     @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
 
@@ -137,7 +137,7 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
 
         // Synthesise an expired chain link directly (the immutability trigger
         // forbids UPDATEs to session_started_at/expires_at; INSERTs are fine).
-        GeneratedRefreshToken expired = tokenGenerator.generate();
+        GeneratedToken expired = tokenGenerator.generate();
         Instant longAgo = Instant.now().minus(8, ChronoUnit.DAYS);
         Instant aDayAgo = longAgo.plus(7, ChronoUnit.DAYS); // = 1 day ago, past expiry
 
@@ -159,7 +159,7 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
     @Test
     void refresh_withUnknownToken_throwsInvalid() {
         // Random 32-byte token that's never been issued.
-        GeneratedRefreshToken unknown = tokenGenerator.generate();
+        GeneratedToken unknown = tokenGenerator.generate();
 
         assertThatThrownBy(() ->
                 authService.refresh(new RefreshTokenCommand(unknown.rawToken())))
@@ -238,7 +238,7 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
     @Test
     void logout_withUnknownToken_silentNoOp() {
         registerAndLogin("jack");
-        GeneratedRefreshToken random = tokenGenerator.generate();
+        GeneratedToken random = tokenGenerator.generate();
 
         authService.logout(random.rawToken());  // does not throw
     }

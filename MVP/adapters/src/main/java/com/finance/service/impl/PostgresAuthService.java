@@ -13,8 +13,8 @@ import com.finance.exception.InvalidRefreshTokenException;
 import com.finance.exception.RefreshTokenReuseException;
 import com.finance.exception.UserAlreadyExistsException;
 import com.finance.security.JwtService;
-import com.finance.security.RefreshTokenGenerator;
-import com.finance.security.RefreshTokenGenerator.GeneratedRefreshToken;
+import com.finance.security.SecureTokenGenerator;
+import com.finance.security.SecureTokenGenerator.GeneratedToken;
 import com.finance.service.AuthService;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -97,7 +97,7 @@ public class PostgresAuthService implements AuthService {
             "WHERE token_hash = :tokenHash AND revoked_at IS NULL";
 
     private final NamedParameterJdbcTemplate setupJdbcTemplate;
-    private final RefreshTokenGenerator      refreshTokenGenerator;
+    private final SecureTokenGenerator      tokenGenerator;
     private final RefreshTokenChainRevoker   chainRevoker;
     private final BCryptPasswordEncoder      passwordEncoder;
     private final JwtService                 jwtService;
@@ -111,14 +111,14 @@ public class PostgresAuthService implements AuthService {
     private final String                     timingDefenceHash;
 
     public PostgresAuthService(NamedParameterJdbcTemplate setupJdbcTemplate,
-                               RefreshTokenGenerator refreshTokenGenerator,
+                               SecureTokenGenerator tokenGenerator,
                                RefreshTokenChainRevoker chainRevoker,
                                BCryptPasswordEncoder passwordEncoder,
                                JwtService jwtService,
                                JwtProperties jwtProperties,
                                Clock clock) {
         this.setupJdbcTemplate     = setupJdbcTemplate;
-        this.refreshTokenGenerator = refreshTokenGenerator;
+        this.tokenGenerator = tokenGenerator;
         this.chainRevoker          = chainRevoker;
         this.passwordEncoder       = passwordEncoder;
         this.jwtService            = jwtService;
@@ -212,7 +212,7 @@ public class PostgresAuthService implements AuthService {
     public TokenPair refresh(RefreshTokenCommand command) {
         // DoS protection (refresh-spam from a stolen-but-still-valid token) is
         // out of scope for S4 — handled at the gateway by B8 rate limiting.
-        String hash = refreshTokenGenerator.hash(command.refreshToken());
+        String hash = tokenGenerator.hash(command.refreshToken());
 
         RefreshTokenRow existing;
         try {
@@ -262,7 +262,7 @@ public class PostgresAuthService implements AuthService {
         // Insert the new chain link. session_started_at is copied UNCHANGED
         // from the parent so the chain cannot extend past the original-login
         // + 7-day window — max-session cap.
-        GeneratedRefreshToken newToken = refreshTokenGenerator.generate();
+        GeneratedToken newToken = tokenGenerator.generate();
         Instant newExpiresAt = existing.sessionStartedAt
                 .plus(jwtProperties.refreshTokenExpiryDays(), ChronoUnit.DAYS);
 
@@ -291,7 +291,7 @@ public class PostgresAuthService implements AuthService {
             return;
         }
 
-        String hash = refreshTokenGenerator.hash(refreshToken);
+        String hash = tokenGenerator.hash(refreshToken);
         setupJdbcTemplate.update(
                 SQL_REVOKE_REFRESH_TOKEN,
                 new MapSqlParameterSource()
@@ -306,7 +306,7 @@ public class PostgresAuthService implements AuthService {
         String accessJwt    = jwtService.generateAccessToken(userId, username);
         Instant accessExpiry = jwtService.getExpiry(accessJwt);
 
-        GeneratedRefreshToken refresh = refreshTokenGenerator.generate();
+        GeneratedToken refresh = tokenGenerator.generate();
         Instant refreshExpiry = now.plus(jwtProperties.refreshTokenExpiryDays(), ChronoUnit.DAYS);
 
         setupJdbcTemplate.update(

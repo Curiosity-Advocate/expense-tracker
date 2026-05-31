@@ -35,6 +35,11 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // More-specific rule first: /sudo-tokens requires Bearer
+                        // even though it lives under /api/v1/auth/**. Spring Security
+                        // matches first rule that fits, so this catches before the
+                        // blanket permitAll below.
+                        .requestMatchers("/api/v1/auth/sudo-tokens").authenticated()
                         .requestMatchers(
                                 "/api/v1/auth/**",
                                 "/swagger-ui/**",

@@ -133,18 +133,31 @@ This is what lets the grantee list grants given *to* them. The USING clause also
 
 Maps to F7, F8, F9.
 
-### `sudo_tokens` (deferred to v2.0)
+### `sudo_tokens`
+
+Step-up authentication artefact for delegation. The grantee mints a sudo token by re-entering their password; the token is short-lived (15 min) and must accompany every `?asUserId=<grantor>` request handled by D3's gateway filter.
 
 ```
-token_hash       VARCHAR(64) PRIMARY KEY                     (SHA-256 hex of the raw token)
-grantor_id       UUID        NOT NULL REFERENCES users(id)
-grantee_id       UUID        NOT NULL REFERENCES users(id)
-expires_at       TIMESTAMPTZ NOT NULL
+token_hash    VARCHAR(64)  PRIMARY KEY                       (SHA-256 hex of the raw token)
+grant_id      UUID         NOT NULL REFERENCES access_grants(id)
+grantee_id    UUID         NOT NULL REFERENCES users(id)     (denormalised — drives the RLS policy)
+expires_at    TIMESTAMPTZ  NOT NULL
+created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 ```
 
-**Lifecycle:** User triggers sudo token creation. Server generates a cryptographically secure random 32-byte token, computes SHA-256 hash, stores the hash with grantor/grantee/expiry, returns the raw token to the user once. The raw token is never stored. On every delegation request, the gateway filter hashes the incoming token and looks it up.
+**Schema notes:**
+- Each sudo token is tied to a specific D1 grant via `grant_id`. The grant's current state (revoked/expired) is checked via JOIN at verify time — so revoking a grant immediately renders all its sudo tokens unusable, no cascade UPDATE needed.
+- `grantee_id` is denormalised from the grant to keep the RLS policy single-clause. Without it, RLS would need a subquery into `access_grants` for every row.
+- No audit columns (security primitive, not business data — same exclusion as `refresh_tokens`).
+- No `revoked_at`. Sudo tokens are 15 minutes long; revocation is by time, not event. If explicit revocation is ever required, a column can be added later.
 
-**Why SHA-256 not BCrypt.** Sudo tokens are 256-bit random values — brute force is computationally infeasible regardless of hash speed. BCrypt would add latency to every delegation request for no security benefit. Maps to F7, F11, N10.
+**Lifecycle.** Server generates a cryptographically secure random 32-byte token, computes SHA-256 hex, stores the hash with `grant_id`, `grantee_id`, and `expires_at = NOW() + 15 minutes`. Returns the raw token to the client **once**. On every delegation request, D3's gateway filter hashes the incoming token, looks it up, JOINs `access_grants` to confirm the underlying grant is still valid, and sets `app.current_user_id = grantor` plus `app.acting_user_id = grantee` for the request scope (the S5 forward-compat hook).
+
+**RLS:** `USING (grantee_id = current_setting('app.current_user_id')::uuid)`. Only the grantee can see their tokens. The grantor doesn't need visibility.
+
+**Why SHA-256 not BCrypt.** Same as `refresh_tokens`: 256-bit random values make brute force computationally infeasible. BCrypt would add latency to every delegation request for no security benefit.
+
+Maps to F7, F11, N10.
 
 ---
 
@@ -476,6 +489,8 @@ erDiagram
     users ||--o{ expense_targets : sets
     users ||--o{ access_grants : grants
     users ||--o{ access_grants : receives
+    access_grants ||--o{ sudo_tokens : authorises
+    users ||--o{ sudo_tokens : mints
     banks ||--o{ bank_accounts : referenced_by
     bank_accounts ||--o{ expenses : associated_with
     categories ||--o{ expense_categories : weighted_in
