@@ -64,7 +64,7 @@ All five v1.1 items have shipped:
 
 Implements F4 (extended), N6, N7, N8.
 
-- **Basiq CDR integration** — manually-triggered bank sync per user; OAuth flow via Bitwarden-stored credentials; raw transactions stored in `raw_bank_transactions` table (append-only, hash-chained for tamper evidence). B1 also creates the `dead_letters` table because the sync endpoint needs somewhere to record fetch/persist failures from day one.
+- **Basiq CDR integration** — manually-triggered bank sync per user. The app-level Basiq API key lives in `.env` / Render secret env vars; per-user Basiq identifiers (`basiq_user_id`, consent IDs) live in a new `bank_connections` table populated when the user completes Basiq's hosted consent flow. Raw transactions stored in `raw_bank_transactions` (append-only, hash-chained for tamper evidence). B1 also creates the `dead_letters` table because the sync endpoint needs somewhere to record fetch/persist failures from day one. The credential model rationale (why `.env` rather than KMS / Vault / Bitwarden) lives in ADR-0019.
 - **Merchant mapping table** — `merchant_mappings(user_id, raw_pattern, friendly_name)` for resolving raw bank merchant strings (e.g. `PYP*AMAZON 1234`) to user-friendly names. CRUD via `/api/v1/merchant-mappings`. Used by the normalisation worker to populate `expenses.merchant_name`.
 - **Normalisation worker** — translates Basiq payload to `expenses` rows; uses the job queue + `FOR UPDATE SKIP LOCKED`
 - **Duplicate detection** — fuzzy matching between manual and bank-imported expenses; weighted score; PROBABLE_PENDING_SETTLEMENT typed for Basiq's PENDING→POSTED pattern
@@ -118,6 +118,11 @@ The v2.0 security work covers what's needed for the threat model — small trust
 - **Active session UI** — `GET /api/v1/auth/sessions` returns all active refresh tokens for the current user (with last-used time, IP, user agent). `DELETE /api/v1/auth/sessions/{id}` revokes one. Lets users notice and end suspicious sessions from a trusted device without waiting for rotation reuse to fire. Also enables **chain-aware logout** — "log me out of the chain this token came from" — which the current OAuth-style logout deliberately does not do.
 - **Anomaly detection on rotation patterns** — rapid back-to-back refreshes, refresh-then-immediate-failure, or geographically improbable usage triggers an alert (or auto-revokes the chain). Closes the gap where an attacker rotates fast enough to never be the one caught by reuse detection.
 - **Rate limiting on auth endpoints** — Bucket4j (or equivalent) on `/auth/login`, `/auth/refresh`, and `/auth/logout`. The S4 design defers refresh-spam DoS protection here. B8's rate limiting is scoped only to the bank-sync endpoint; the auth endpoints have their own protection profile (per-IP for login, per-token for refresh).
+
+**Secret management (deferred from B1):**
+
+- **Bitwarden Secrets Manager via REST API** — replace the `.env` / Render-secrets approach for `BASIQ_API_KEY` with a Bitwarden Secrets Manager machine-account fetch at app startup. Call the REST API directly rather than using the (beta) Java SDK to avoid the JNI native-library dependency and version-skew risk. Free tier (3 projects, 3 machine accounts, unlimited secrets) is enough for personal use; resume signal is "I implemented a secrets-manager integration with bootstrap-secret hierarchy." Rationale and the threshold that triggers the migration are in ADR-0019.
+- **Async bank-sync via the B3 job queue** — refactor `POST /api/v1/bank-sync` from synchronous fetch+persist to "enqueue a BANK_SYNC job; return 202." The B3 normalisation worker (or a sibling) picks up sync jobs via `SELECT … FOR UPDATE SKIP LOCKED`. Pre-conditions: B3 has shipped and stabilised; bank-sync latency has become a real user-visible problem (Basiq 5xx → request timeout). Adds `GET /api/v1/bank-sync/{jobId}` for status polling. Deferred from B1 because half-broken endpoints on main while we wait for B3 felt worse than the eventual refactor (~2–4 hours). See ADR-0019 for the trade-off.
 
 **Delegation enhancements (deferred from D3):**
 

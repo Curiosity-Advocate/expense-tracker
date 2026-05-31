@@ -15,7 +15,7 @@ Qualities the system must hold while delivering the functional requirements. Eac
 | N3 | HTTPS enforced via redirect and HSTS |
 | N4 | Passwords BCrypt hashed before storage |
 | N5 | JWT signing with rotation capability |
-| N6 | Bank credentials never stored in DB — Bitwarden reference only — deferred to v2.0 |
+| N6 | App-level Basiq API key lives in env config (`.env` / Render secret env vars); per-user Basiq enrolment is via Basiq's hosted consent UI so the app never sees raw bank credentials. v3.0 migrates the app-level key to Bitwarden Secrets Manager (REST API) — see ADR-0019 |
 | N7 | Hash chaining for tamper evidence on bank imported data — deferred to v2.0 |
 
 ---

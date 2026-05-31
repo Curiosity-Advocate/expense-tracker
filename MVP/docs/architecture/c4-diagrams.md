@@ -30,7 +30,7 @@ flowchart TB
     class render external
 ```
 
-One user actor, one system, one hosting platform. No external integrations in v1.0 — Basiq (bank data) and Bitwarden (OAuth tokens) appear at this level only when v2.0 brings them in.
+One user actor, one system, one hosting platform. No external integrations in v1.0 — Basiq (bank data, including its hosted consent UI for per-user enrolment) appears at this level only when v2.0 brings it in. The app-level Basiq API key sits in env config; v3.0 may migrate it to Bitwarden Secrets Manager (ADR-0019).
 
 ---
 

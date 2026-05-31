@@ -34,7 +34,9 @@ worker/    ←  depends on core only — talks to PostgreSQL via raw JdbcTemplat
 
 Domain interfaces in `core` never import Spring annotations, JDBC, or HTTP clients. Adapters in `adapters` implement port interfaces from `core` using infrastructure-specific libraries. `api` depends on `core` and `adapters`; `worker` depends on `core` only (it talks to the database via raw JDBC and does not link the JPA adapter implementations).
 
-The boundary is *not* a pure hexagonal split — Spring Boot and Java are taken as givens, so the HTTP layer, security, and config live directly in `api` rather than behind adapter interfaces. Only things that could realistically be swapped (database, ORM) sit behind the adapter boundary.
+The boundary is *not* a pure hexagonal split — Spring Boot and Java are taken as givens, so the HTTP layer and HTTP-facing concerns (filters, controllers, `GlobalExceptionHandler`, `SecurityConfig`) live directly in `api` rather than behind adapter interfaces. Only things that could realistically be swapped (database, ORM) sit behind the adapter boundary.
+
+Some Spring-coupled classes live in `adapters` rather than `api` because they're consumed by adapter services. `DataSourceConfig`, `JwtProperties`, `JwtService`, and `SecureTokenGenerator` are imported by `PostgresAuthService` and `PostgresSudoTokenService` — and since `adapters` cannot depend on `api` (it would create a cycle), the classes have to live in the lower module. `com.finance.security` and `com.finance.config` end up as split packages spanning both modules. That's mildly unusual but is the lowest-churn way to keep the dependency graph acyclic.
 
 ---
 
@@ -53,14 +55,16 @@ adapters/
 ├── entity/         JPA entities
 ├── repository/     Spring Data JPA repositories
 ├── service/impl/   Service implementations (PostgresExpenseService, ...)
+├── config/         Spring config consumed by adapters' services (DataSourceConfig, JwtProperties, BasiqProperties)
+├── security/       Pure-crypto building blocks used by adapter services (JwtService, SecureTokenGenerator)
 └── resources/db/migration/   Flyway SQL migrations
 
 api/
 ├── ApiApplication.java        @SpringBootApplication entry point
 ├── controller/                HTTP translation, command building
 ├── dto/                       request / response shapes
-├── security/                  JwtAuthenticationFilter, RlsSessionAspect, TraceIdFilter, SecurityConfig
-├── config/                    JwtProperties, OpenApiConfig, ClockConfig
+├── security/                  HTTP-facing filters and aspects (JwtAuthenticationFilter, AsUserIdFilter, RlsSessionAspect, TraceIdFilter, JwtAuthenticationEntryPoint)
+├── config/                    HTTP-facing config (SecurityConfig, OpenApiConfig, ClockConfig)
 └── exception/                 GlobalExceptionHandler (the only Spring-coupled exception class)
 
 worker/
@@ -156,8 +160,7 @@ graph TB
     end
 
     subgraph External ["External Systems (v2.0)"]
-        Basiq["Basiq CDR<br/>(Bank Data)"]
-        BW["Bitwarden<br/>(OAuth Tokens)"]
+        Basiq["Basiq CDR<br/>(Bank Data + Hosted Consent UI)"]
     end
 
     User -->|"HTTPS Request"| API
@@ -166,6 +169,7 @@ graph TB
     W -->|"FOR UPDATE SKIP LOCKED"| JQ
     W -->|"Direct Call"| BL
     BL -->|"Read / Write"| MD
-    W -->|"Fetch Transactions"| Basiq
-    W -->|"Fetch Token Reference"| BW
+    API -->|"Fetch Transactions (B1 sync — moves to W in v3.0 async refactor)"| Basiq
 ```
+
+The app-level Basiq API key lives in env config (`.env` / Render secret env vars). v3.0 may migrate it to Bitwarden Secrets Manager via REST — see ADR-0019.
