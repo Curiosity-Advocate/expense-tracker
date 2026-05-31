@@ -23,7 +23,7 @@ Each requirement is a single capability statement. Grouped by business category 
 
 | ID | Requirement |
 |---|---|
-| F7 | User can grant temporary access to another user for 1 to 10 days |
+| F7 | User can grant temporary access to another user for 1 to 30 days |
 | F8 | Grantee must be opted in via `isDiscoverable` to be granted access |
 | F9 | User can revoke a grant early |
 | F10 | User can list their grants |
@@ -31,7 +31,7 @@ Each requirement is a single capability statement. Grouped by business category 
 | F12 | Delegation scope limited to expense endpoints only |
 | F13 | Expired grants are enforced at request time by the gateway filter |
 
-> **Note:** F7–F13 are designed but not implemented in v1.0. They are deferred to v2.0 — see [../roadmap.md](../roadmap.md).
+> **Note:** F7–F13 shipped in v2.0 (D1 grants + D2 sudo tokens + D3 gateway filter). See [../roadmap.md](../roadmap.md).
 
 ---
 

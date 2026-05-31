@@ -2,7 +2,7 @@
 
 > **Context:** Expands [overview.md §7](../overview.md#7-how-the-system-stays-healthy). See also [deployment.md](deployment.md) for how the Worker is hosted. Driven by: F34, F35, F36, F37, N19, N20, N21, N22.
 
-The Worker process owns two mechanisms: a cron scheduler for housekeeping and partition management, and a job-queue consumer that is wired but processes no job types in v1.0 (ready for bank sync in v2.0). This document covers what runs, when, and why.
+In v1.0 the Worker process owns one mechanism: a cron scheduler for housekeeping and partition management. The job-queue consumer is designed for v2.0 (B3, normalisation worker) — no `jobs` table or consumer loop exists in v1.0. This document covers what runs, when, and why.
 
 ---
 

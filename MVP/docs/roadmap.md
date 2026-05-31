@@ -28,7 +28,7 @@ Implements F1–F6, F14–F37, N1–N5, N9–N14, N16–N22.
 | Delegation / sudo tokens (F7–F13, N6 partial) | Designed in [api-contract.md](architecture/api-contract.md) but not implemented. Deferred to v2.0. |
 | Bank integration (N6, N7, N8) | Out of scope for "prove the core loop". Designed for v2.0. |
 | AI categorisation | Same — depends on bank integration to be useful. |
-| Dead-letter API endpoints | The table exists as infrastructure but no endpoints to list or retry. Bank sync is what would populate the dead letter, so they ship together. |
+| Dead-letter API endpoints | Neither the table nor the endpoints exist in v1.0. Bank sync is what would populate the dead letter, so they ship together in v2.0 — table in B1, operator API in B7. |
 | Read replica routing | Single primary handles both reads and writes at MVP scale. |
 | Rate limiting | Not warranted at 10 users. Designed for v2.0. |
 | Active alerting on job failures | v1.0 captures failures in structured JSON logs only. Email alerts in v1.1. |
@@ -64,13 +64,13 @@ All five v1.1 items have shipped:
 
 Implements F4 (extended), N6, N7, N8.
 
-- **Basiq CDR integration** — manually-triggered bank sync per user; OAuth flow via Bitwarden-stored credentials; raw transactions stored in `raw_bank_transactions` table (append-only, hash-chained for tamper evidence)
+- **Basiq CDR integration** — manually-triggered bank sync per user; OAuth flow via Bitwarden-stored credentials; raw transactions stored in `raw_bank_transactions` table (append-only, hash-chained for tamper evidence). B1 also creates the `dead_letters` table because the sync endpoint needs somewhere to record fetch/persist failures from day one.
 - **Merchant mapping table** — `merchant_mappings(user_id, raw_pattern, friendly_name)` for resolving raw bank merchant strings (e.g. `PYP*AMAZON 1234`) to user-friendly names. CRUD via `/api/v1/merchant-mappings`. Used by the normalisation worker to populate `expenses.merchant_name`.
 - **Normalisation worker** — translates Basiq payload to `expenses` rows; uses the job queue + `FOR UPDATE SKIP LOCKED`
 - **Duplicate detection** — fuzzy matching between manual and bank-imported expenses; weighted score; PROBABLE_PENDING_SETTLEMENT typed for Basiq's PENDING→POSTED pattern
 - **Duplicate resolution UI/API** — user merges or keeps both; merge audit trail immutable via DB trigger
 - **Bank-imported expenses immutable** — amount/merchant/date/payment locked; only categories and notes editable
-- **Dead-letter API** — list dead letters, manual retry endpoint, surfaced via `/api/v1/dead-letters`
+- **Dead-letter API** — list dead letters and manual retry endpoint surfaced via `/api/v1/dead-letters`. The table itself is created in B1; B7 only ships the operator surface.
 - **Rate limiting** — Bucket4j on bank sync (5 per user per 24h)
 
 ### Delegation

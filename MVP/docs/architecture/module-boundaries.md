@@ -120,7 +120,7 @@ Request validation is structural only — required fields present, correct types
 
 ## Worker layer responsibilities
 
-The Worker owns two mechanisms. **A cron scheduler** for partition management, nightly cleanup, and materialised view refresh. **A job queue consumer** wired but processing no job types in v1.0 — ready for bank sync in v2.0.
+The Worker owns one mechanism in v1.0: **a cron scheduler** for partition management, nightly cleanup, and materialised view refresh. **A job queue consumer** is designed for v2.0 (B3) and arrives with the normalisation worker — no `jobs` table or pulling loop exists in v1.0.
 
 **Nightly cleanup jobs (02:00 – 02:15 UTC)** — expired revoked tokens, expired idempotency keys, login failures older than 30 days, and finished `job_execution_state` rows (SUCCESS >1 day, ALERTED >7 days).
 
