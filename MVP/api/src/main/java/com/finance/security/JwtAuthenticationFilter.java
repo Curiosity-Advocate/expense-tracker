@@ -52,7 +52,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         UUID userId    = jwtService.getUserId(token);
         String username = jwtService.getUsername(token);
 
-        UserPrincipal principal = new UserPrincipal(userId, username);
+        // Non-delegated: actingAs = null. D3's AsUserIdFilter swaps this
+        // principal with a 3-arg variant when ?asUserId= + a valid sudo token
+        // are present on a delegation-allowed endpoint.
+        UserPrincipal principal = UserPrincipal.of(userId, username);
         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                 principal, null, List.of()
         );

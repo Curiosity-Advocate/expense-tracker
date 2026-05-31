@@ -277,11 +277,39 @@ Step-up authentication. The grantee mints a sudo token by re-entering their pass
 - 401 `INVALID_CREDENTIALS` — wrong password
 - 401 `GRANT_NOT_USABLE` — grant doesn't exist, isn't the current user's, is revoked, or is expired. The four conditions are indistinguishable from the caller's perspective (enumeration defence)
 
-#### Verify _(internal — used by D3 when it ships)_
+#### Verify _(internal — used by D3)_
 
-`SudoTokenService.verify(rawToken, granteeId)` returns `SudoTokenVerification(grantId, grantorId, granteeId)` if the token is valid and its underlying grant is still active. Throws `InvalidSudoTokenException` for unknown, expired, or revoked-grant tokens. Not exposed as an HTTP endpoint; called by D3's filter directly.
+`SudoTokenService.verify(rawToken, granteeId)` returns `SudoTokenVerification(grantId, grantorId, granteeId)` if the token is valid and its underlying grant is still active. Throws `InvalidSudoTokenException` for unknown, expired, or revoked-grant tokens. Not exposed as an HTTP endpoint; called by D3's `AsUserIdFilter` directly.
 
 Implements F11.
+
+---
+
+### Delegated requests (D3)
+
+A grantee actually exercises a D1 grant by adding two things to any request on an allow-listed endpoint:
+
+- **`?asUserId=<grantor-uuid>`** query parameter — the data owner whose context the request should operate under
+- **`X-Sudo-Token: <raw>`** header — a valid D2 sudo token previously minted by the grantee against that specific grant
+
+`AsUserIdFilter` validates both, then substitutes the request's `UserPrincipal` so the controller sees the grantor as the current user. RLS scopes data access to the grantor; the S5 audit triggers record the grantee as the actor in `created_by` / `modified_by`.
+
+**Scope.** Only requests under `/api/v1/expenses` accept the delegation parameters in v2.0. All other endpoints (auth, profile, access-grant management, etc.) reject `?asUserId=` with a 403. Adding more endpoints to the allow-list is a deliberate future policy decision; the default is fail-closed.
+
+**Self-delegation no-op.** A request with `?asUserId=<self>` passes through without substitution (no `X-Sudo-Token` required). Lets clients construct URLs without conditionals during development.
+
+**Failures:**
+
+| Status | Code | Cause |
+|---|---|---|
+| 400 | `VALIDATION_ERROR` | `asUserId` is not a UUID |
+| 403 | `ASUSER_NOT_ALLOWED_HERE` | endpoint is outside the delegation allow-list |
+| 401 | `INVALID_SUDO_TOKEN` | missing `X-Sudo-Token` header, unknown token, expired token, grant since revoked, OR sudo token's grantor doesn't match `asUserId` (single error to prevent enumeration) |
+| 401 | `UNAUTHORISED` | no Bearer JWT on the request |
+
+The four `INVALID_SUDO_TOKEN` conditions return the same status + code by design.
+
+Implements F12, F13.
 
 ---
 

@@ -1,5 +1,6 @@
 package com.finance.config;
 
+import com.finance.security.AsUserIdFilter;
 import com.finance.security.JwtAuthenticationEntryPoint;
 import com.finance.security.JwtAuthenticationFilter;
 import com.finance.security.TraceIdFilter;
@@ -20,13 +21,16 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtFilter;
     private final JwtAuthenticationEntryPoint entryPoint;
     private final TraceIdFilter traceIdFilter;
+    private final AsUserIdFilter asUserIdFilter;
 
     public SecurityConfig(JwtAuthenticationFilter jwtFilter,
                           JwtAuthenticationEntryPoint entryPoint,
-                          TraceIdFilter traceIdFilter) {
+                          TraceIdFilter traceIdFilter,
+                          AsUserIdFilter asUserIdFilter) {
         this.jwtFilter = jwtFilter;
         this.entryPoint = entryPoint;
         this.traceIdFilter = traceIdFilter;
+        this.asUserIdFilter = asUserIdFilter;
     }
 
     @Bean
@@ -55,6 +59,10 @@ public class SecurityConfig {
                 // is set in MDC for every log line, including auth failures.
                 .addFilterBefore(traceIdFilter, JwtAuthenticationFilter.class)
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                // D3 — AsUserIdFilter substitutes the principal for delegated
+                // requests. Runs AFTER JwtAuthenticationFilter (needs the JWT-derived
+                // principal in SecurityContext to validate against).
+                .addFilterAfter(asUserIdFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 

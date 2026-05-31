@@ -54,10 +54,23 @@ public class RlsSessionAspect {
                 && auth.isAuthenticated()
                 && auth.getPrincipal() instanceof UserPrincipal principal) {
 
+            // RLS scopes to this. For a non-delegated request this is the
+            // JWT subject; for a delegated request (D3) this is the grantor.
             entityManager
                     .createNativeQuery("SELECT set_config('app.current_user_id', :uid, true)")
                     .setParameter("uid", principal.userId().toString())
                     .getSingleResult();
+
+            // S5 audit triggers prefer this over current_user_id when set.
+            // Non-null only after D3's AsUserIdFilter substituted the principal —
+            // means the request is acting on someone else's behalf, and audit
+            // columns should record the actor (the grantee), not the owner.
+            if (principal.actingAs() != null) {
+                entityManager
+                        .createNativeQuery("SELECT set_config('app.acting_user_id', :actor, true)")
+                        .setParameter("actor", principal.actingAs().toString())
+                        .getSingleResult();
+            }
         }
     }
 
