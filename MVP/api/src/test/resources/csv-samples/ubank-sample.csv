@@ -1,0 +1,4 @@
+Date and time,Description,Debit,Credit,From account,To account,Payment type,Category,Receipt number,Transaction ID
+31/05/2026 8:18, Paymet to me,$50.00,,Pay Account,,Osko,Uncategorised,"ESFH-fabricated","32835-fabricated"
+30/05/2026 14:22,Coffee purchase,$5.50,,Spending,,Card,Food,REC001,TXN001
+29/05/2026 10:00,Refund received,,$15.00,Refunds,Spending,Bank Transfer,Income,REC002,TXN002
