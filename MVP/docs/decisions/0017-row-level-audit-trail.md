@@ -33,7 +33,7 @@ The design question wasn't "should we add audit columns" but "how do we populate
 - `user_login_failures` — security log; the row IS the audit by design, no separate `_by` columns needed.
 - `refresh_tokens` — the V21 `enforce_immutability_except` trigger allows only `revoked_at` and `revoke_reason` on UPDATE. Adding `modified_by` would either require widening that allow-list (weakening the security boundary) or special-casing this trigger. Refresh tokens are a security primitive whose audit value is captured by `revoke_reason` already.
 - `expense_idempotency_keys` — system-managed cache; created once, never updated by users.
-- `banks`, `partition_registry`, `job_execution_state` — system-wide infrastructure, no user concept.
+- `partition_registry`, `job_execution_state` — system-wide infrastructure, no user concept.
 
 ## Consequences
 

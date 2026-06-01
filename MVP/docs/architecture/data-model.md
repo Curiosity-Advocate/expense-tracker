@@ -16,7 +16,7 @@ These apply to every table without restatement.
 
 **Timestamps.** All `TIMESTAMPTZ` stored in UTC. Display conversion is the client's responsibility.
 
-**Audit columns.** Every user-scoped business table has `created_at`, `updated_at`, `created_by`, `modified_by`. The `_at` columns are managed by DB defaults + triggers; the `_by` columns are managed by the `set_audit_user` trigger added in V23. Security / system-infrastructure tables (`user_login_failures`, `refresh_tokens`, `expense_idempotency_keys`, `banks`, `partition_registry`, `job_execution_state`) skip the `_by` columns — see [ADR-0017](../decisions/0017-row-level-audit-trail.md) for which tables and why.
+**Audit columns.** Every user-scoped business table has `created_at`, `updated_at`, `created_by`, `modified_by`. The `_at` columns are managed by DB defaults + triggers; the `_by` columns are managed by the `set_audit_user` trigger added in V23. Security / system-infrastructure tables (`user_login_failures`, `refresh_tokens`, `expense_idempotency_keys`, `partition_registry`, `job_execution_state`) skip the `_by` columns — see [ADR-0017](../decisions/0017-row-level-audit-trail.md) for which tables and why.
 
 **Timestamp ownership rule:**
 
@@ -163,35 +163,149 @@ Maps to F7, F11, N10.
 
 ## Reference data
 
-### `banks`
+### `banks` *(deferred — not in v2.0)*
 
-```
-id          UUID         PRIMARY KEY
-name        VARCHAR(255) NOT NULL
-abn         VARCHAR(11)  NOT NULL UNIQUE                     (CHECK LENGTH = 11 AND abn ~ '^[0-9]+$')
-```
-
-Public reference data. No RLS — all authenticated users read the same list. Populated via Flyway seed scripts with major Australian banks (CBA, ANZ, NAB, Westpac, Macquarie, Bendigo, ING, ME Bank). Same seed runs in personal and demo deployments. Maps to F20.
+The v1.0 design described a `banks` reference table (id / name / abn) that would back a foreign key on `bank_accounts`. **Neither the table nor the FK were ever created** — V3 ships `bank_accounts` without `bank_id`. The bank-identity concept now lives instead on `csv_import_connections.source_format` (which encodes both the bank and the CSV version, e.g. `csv_cba_v1`), so v2.0 doesn't need a separate `banks` table. If a future v3.0 aggregator path needs a real banks reference (e.g. Basiq's institution-id mapping), it can be added then with concrete requirements.
 
 ### `bank_accounts`
 
 ```
 id              UUID        PRIMARY KEY
 user_id         UUID        NOT NULL REFERENCES users(id)
-bank_id         UUID        NULL REFERENCES banks(id)
-name            VARCHAR(50) NOT NULL
-account_type    VARCHAR(20) NOT NULL                          (CHECK IN ('CASH', 'CRYPTO', 'BANK'))
+name            VARCHAR(50) NOT NULL                          (UNIQUE per user)
+account_type    VARCHAR(20) NOT NULL                          (CHECK IN ('CASH', 'CRYPTO', 'BANK', 'CREDIT_CARD'))
 is_system       BOOLEAN     NOT NULL DEFAULT FALSE
-CHECK ((account_type = 'BANK' AND bank_id IS NOT NULL)
-    OR (account_type != 'BANK' AND bank_id IS NULL))
-UNIQUE (user_id, name)
 ```
 
-RLS enforced via `user_id`. CASH and CRYPTO system accounts are created at registration for every user (application code). Real bank accounts are seeded via Flyway for known personal users only — demo deployment seeds none. Achieved by separating Flyway migration locations per deployment environment. Maps to F20, N10.
+Plus the standard four audit columns (`created_at`, `updated_at`, `created_by`, `modified_by`).
+
+RLS enforced via `user_id`. CASH and CRYPTO system accounts are created at registration for every user (application code). BANK and CREDIT_CARD accounts are user-created (manual) in v2.0; CREDIT_CARD distinguishes credit-card-based accounts so the B3 normaliser knows to filter out card-payment rows (which are transfers, not expenses). The column was widened from VARCHAR(10) to VARCHAR(20) in V28 to fit `CREDIT_CARD` (11 chars) with headroom for future values (OFFSET, INVESTMENT, etc.) without further migrations.
+
+Maps to F20, N10.
 
 ---
 
-## Expense module
+## Bank integration (v2.0)
+
+### `raw_bank_transactions`
+
+Append-only verbatim record of every bank transaction imported into the system (V26, B1). Captured before any normalisation so we always have ground truth to re-derive expenses from if the B3 normalisation logic changes. v2.0 populates this table from user-uploaded CSV files (one of six bank-specific formats); v3.0 may add aggregator-pulled sources alongside. Maps to N7.
+
+```
+id                      UUID         PRIMARY KEY
+user_id                 UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE
+source_format           VARCHAR(20)  NOT NULL                            (CHECK: csv_cba_v1 | csv_anz_v1 | csv_ubank_v1 | csv_amp_v1 | csv_qudos_v1 | csv_suncorp_v1)
+external_transaction_id VARCHAR(100) NOT NULL                            (for CSV: SHA-256 of date+amount+description+bank for idempotent re-uploads)
+raw_payload             JSONB        NOT NULL                            (structured parsed view + verbatim raw line)
+fetched_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+prev_hash               CHAR(64)     NULL                                (predecessor's current_hash, NULL on user's first row)
+current_hash            CHAR(64)     NOT NULL                            (SHA-256 hex; set by BEFORE INSERT trigger)
+UNIQUE (user_id, external_transaction_id)
+UNIQUE (current_hash)
+```
+
+**`source_format` discriminator.** The CHECK constraint enforces an allow-list — typo at import time can't poison the B3 normaliser. Adding a new bank format (or v3.0 aggregator format) requires a follow-up migration that drops + recreates the constraint with the new value included. The B3 normaliser dispatches on this column to pick the right parser.
+
+**Tamper evidence — per-user hash chain.** Each row's `current_hash = SHA-256(prev_hash || raw_payload::text || user_id || external_transaction_id)`, hex-encoded. The chain is per-user so different users don't serialise on a shared tail row and one user's compromise doesn't require recomputing everyone's chain. The `compute_raw_bank_transaction_hash` BEFORE INSERT trigger takes a `pg_advisory_xact_lock(hashtextextended(user_id::text, 0))` to serialise concurrent inserts for the same user without forcing the whole transaction into SERIALIZABLE — see [ADR-0019](../decisions/0019-basiq-credential-model.md) and the V26 comment for the rejected alternatives.
+
+**Append-only.** UPDATE is blocked by `enforce_immutability_except()` (empty allow-list — every column locked once written); DELETE is blocked by `block_delete_on_raw_bank_transactions()`. Tamper evidence is meaningless without these.
+
+**RLS.** Standard single-clause on `user_id`. Worker bypass-RLS reads cross-user for maintenance.
+
+**Idempotency.** Re-syncing returns the same external_transaction_id; the unique `(user_id, external_transaction_id)` lets the application use ON CONFLICT DO NOTHING to skip duplicates without modifying the chain.
+
+Maps to N6, N7, F20.
+
+### `dead_letters`
+
+Operator-surfaced record of failed background work (V27, B1). Pulled forward from B7's spec because B1's sync endpoint needs somewhere to record fetch/persist failures from day one. B7 ships the operator API on top of this table; B1 ships the table and writes to it.
+
+```
+id            UUID         PRIMARY KEY
+user_id       UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE
+job_type      VARCHAR(50)  NOT NULL                                      (CHECK IN: BANK_SYNC; B3 will add NORMALISE)
+payload       JSONB        NOT NULL                                      (inputs needed to replay the failed work)
+error_class   VARCHAR(255) NOT NULL                                      (fully-qualified exception name)
+error_message TEXT         NOT NULL
+attempts      INT          NOT NULL DEFAULT 1 CHECK (attempts > 0)
+created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+retried_at    TIMESTAMPTZ  NULL                                          (set when operator hits retry, success or not)
+resolved_at   TIMESTAMPTZ  NULL                                          (set when operator marks done; set-once)
+```
+
+**Mutability rules.** `enforce_immutability_except('attempts', 'retried_at', 'resolved_at')` blocks any other column from changing post-insert; the original failure record is preserved verbatim. `resolved_at` is set-once via `enforce_set_once_column` so an operator can't silently un-resolve a row. DELETE is blocked — operators "delete" by resolving via the API.
+
+**RLS.** Per-user isolation on `user_id`. The B1 sync endpoint runs on the app pool, so writes happen under `app.current_user_id = the syncing user`. B7's operator API for cross-user dashboards (if added) would need the superuser pool or a deliberate RLS exception — not in scope for v2.0.
+
+**`job_type` discriminator.** CHECK constraint enforces an allow-list (`BANK_SYNC` in v2.0; B3 adds `NORMALISE` via a follow-up migration). Each writer + retry handler shares the schema contract for its job_type's `payload` shape.
+
+Maps to N7, N21.
+
+### `csv_import_connections`
+
+Per-account CSV import configuration (V28, B1.3). One row per `bank_account` that has CSV import set up. The bank-integration module owns this table exclusively — nothing outside `com.finance.bankintegration..` reads or writes it (ArchUnit-enforced in B1.4). v3.0 may add a sibling `basiq_import_connections` (or similar) for aggregator-pulled accounts; the cross-source "at most one active per bank_account" invariant arrives in v3.0 with the second source — not needed while only CSV exists.
+
+```
+bank_account_id  UUID         PRIMARY KEY REFERENCES bank_accounts(id) ON DELETE CASCADE
+user_id          UUID         NOT NULL REFERENCES users(id)                                (denormalised for RLS)
+bank_id          VARCHAR(20)  NOT NULL                                                     (CHECK: cba | anz | ubank | amp | qudos | suncorp)
+csv_export_url   VARCHAR(500) NULL                                                         (user's bookmark for the bank's CSV export page)
+last_imported_at TIMESTAMPTZ  NULL                                                         (set on successful import only; drives 7-day rate limit)
+last_date_to     DATE         NULL                                                         (MAX(transaction_date) ever seen; UX hint, not a rate-limit input)
+```
+
+Plus the standard four audit columns.
+
+**1:1 with `bank_accounts`.** The PK is the FK to `bank_accounts.id` — at most one CSV connection per account. Switching off CSV is a delete-row operation. Cascade delete ensures orphan-free.
+
+**`bank_id` discriminator.** The CHECK list enforces the supported-banks allow-list. New banks add a value here and to `raw_bank_transactions.source_format`'s CHECK in a single migration. *Note*: the column is named `bank_id` (rather than `bank_code`) for consistency with the schema's `*_id` convention even though there's no `banks` table — values are an enum encoded as VARCHAR. See [ADR-0020](../decisions/0020-csv-import-architecture.md) for the date-dispatched parser model that makes this column persistent across format-revision changes.
+
+**Parser version dispatch (date-based).** Unlike a stored `source_format` design, this connection doesn't lock in a parser version. The import service picks the parser at upload time using `(bank_id, exportedOnDate)`. When a bank changes their export format, we ship a new parser version (e.g. `csv_cba_v2`) with a `validFromDate`; existing connections keep working with the old parser for older exports and the new parser for newer ones. The parser stamps its own `versionTag` into `raw_bank_transactions.source_format` on each persisted row, so per-row provenance is preserved.
+
+**Rate limit.** `last_imported_at` is updated by the import service on success only. The service checks `NOW() < last_imported_at + INTERVAL '7 days'` and returns 429 if true. Failed imports don't reset the timer.
+
+**RLS.** Standard single-clause on `user_id`.
+
+Maps to N6, N7.
+
+### `csv_imports`
+
+Job state for async CSV processing (V29, B1.4). Each row tracks one upload from submission through to terminal status. The upload endpoint inserts a `PENDING` row, hands the bytes to a Spring `@Async` processor, and returns 202 immediately; the processor walks the row through `RUNNING` → `COMPLETED` (or `FAILED`) over batches.
+
+```
+id                       UUID         PRIMARY KEY
+bank_account_id          UUID         NOT NULL REFERENCES csv_import_connections(bank_account_id) ON DELETE CASCADE
+user_id                  UUID         NOT NULL REFERENCES users(id)                      (denormalised for RLS)
+status                   VARCHAR(20)  NOT NULL                                            (PENDING | RUNNING | COMPLETED | FAILED)
+exported_on_date         DATE         NOT NULL                                            (drives parser dispatch)
+parser_version_tag       VARCHAR(20)  NOT NULL                                            (matches the parser the dispatcher picked)
+raw_csv_bytes            BYTEA        NOT NULL                                            (zeroed when terminal — see raw_csv_bytes_deleted_at)
+raw_csv_bytes_deleted_at TIMESTAMPTZ  NULL
+imported_count           INT          NOT NULL DEFAULT 0
+deduped_count            INT          NOT NULL DEFAULT 0
+parse_error_count        INT          NOT NULL DEFAULT 0
+last_processed_row       INT          NOT NULL DEFAULT 0
+error_message            TEXT         NULL                                                (populated only when status=FAILED)
+submitted_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+started_at               TIMESTAMPTZ  NULL                                                (set when status -> RUNNING)
+completed_at             TIMESTAMPTZ  NULL                                                (set on COMPLETED or FAILED)
+```
+
+Plus the standard four audit columns. State-machine integrity is backstopped by CHECK constraints (`chk_terminal_has_completed_at`, `chk_non_pending_has_started_at`, `chk_failed_has_error`, `chk_bytes_deleted_only_on_terminal`).
+
+**State transitions:**
+- `PENDING → RUNNING` — processor picks it up, sets `started_at`.
+- `RUNNING → COMPLETED` — final batch persists, bytes zeroed, `csv_import_connections.last_imported_at` / `last_date_to` updated in the same transaction.
+- `RUNNING → FAILED` — terminal exception caught; `error_message` set, `completed_at` set, bytes zeroed. Connection's `last_*` left unchanged so the rate-limit door stays open.
+- `RUNNING → PENDING` — startup recovery resets rows whose API process died mid-import (`started_at < NOW() - 10 min`). Counters reset to 0; the processor restarts from the beginning (dedup catches partial inserts from the previous run).
+
+**Why `raw_csv_bytes` lives here.** The async boundary means the upload request is gone by the time the processor runs. The bytes have to live somewhere durable. Putting them on the same row that tracks job state keeps everything in one place; immediate cleanup on terminal status bounds growth (`UPDATE csv_imports SET raw_csv_bytes = '\\x', raw_csv_bytes_deleted_at = NOW() WHERE id = ?` in the same TX that flips to COMPLETED).
+
+**Rate-limit semantics.** On upload, the service rejects (429) if any row exists for this `bank_account_id` with `status IN ('RUNNING')` OR `(status = 'COMPLETED' AND completed_at > NOW() - INTERVAL '7 days')`. The partial index `idx_csv_imports_recent_per_connection` keeps that check fast.
+
+**RLS** standard on `user_id`. **Setup-pool grant** — the startup recovery scan runs outside any user context (no JWT at process start), so it goes through the `expense_setup` role which has BYPASSRLS. V29 grants `SELECT, UPDATE` on this table to `expense_setup`; recovery resets stale RUNNING rows + re-kicks-off the `@Async` processor.
+
+Maps to N6, N7, N21.
 
 ### `categories`
 
@@ -491,7 +605,6 @@ erDiagram
     users ||--o{ access_grants : receives
     access_grants ||--o{ sudo_tokens : authorises
     users ||--o{ sudo_tokens : mints
-    banks ||--o{ bank_accounts : referenced_by
     bank_accounts ||--o{ expenses : associated_with
     categories ||--o{ expense_categories : weighted_in
     categories ||--o{ target_categories : scoped_in
@@ -500,4 +613,9 @@ erDiagram
     expenses ||--o{ expense_idempotency_keys : protected_by
     expense_targets ||--|{ target_categories : scoped_by
     partition_registry ||..|| expenses : controls_active
+    users ||--o{ raw_bank_transactions : owns_imports
+    users ||--o{ dead_letters : owns_failures
+    bank_accounts ||--o| csv_import_connections : configures_csv_for
+    csv_import_connections ||--o{ csv_imports : tracks_uploads_for
+    users ||--o{ csv_imports : submits
 ```
