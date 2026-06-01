@@ -1,4 +1,0 @@
-rootProject.name = 'expense-tracker'
-include 'core'
-include 'api'
-include 'worker'
