@@ -77,7 +77,20 @@ public class CsvImportService {
         row.setExportedOnDate(exportedOnDate);
         row.setParserVersionTag(parser.versionTag());
         row.setRawCsvBytes(csvBytes);
-        CsvImportEntity saved = imports.save(row);
+
+        CsvImportEntity saved;
+        try {
+            saved = imports.save(row);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Schema-level catch for the partial unique index (V30) on
+            // (bank_account_id) WHERE status IN ('PENDING','RUNNING').
+            // Fires when two concurrent uploads slip past the app-layer
+            // hasRecentOrInFlightImport() check in the same millisecond.
+            // Surface as the same 429 the app-layer check would have
+            // returned. nextAllowedAt is set to "shortly" since the
+            // other in-flight import will finish on its own.
+            throw new CsvImportRateLimitedException(clock.instant().plusSeconds(60));
+        }
 
         processor.kickoff(saved.getId());
 

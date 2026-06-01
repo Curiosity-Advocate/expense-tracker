@@ -303,6 +303,8 @@ Plus the standard four audit columns. State-machine integrity is backstopped by 
 
 **Rate-limit semantics.** On upload, the service rejects (429) if any row exists for this `bank_account_id` with `status IN ('RUNNING')` OR `(status = 'COMPLETED' AND completed_at > NOW() - INTERVAL '7 days')`. The partial index `idx_csv_imports_recent_per_connection` keeps that check fast.
 
+**Schema-level defence-in-depth (V30).** A partial UNIQUE index `idx_csv_imports_one_in_flight_per_account` on `(bank_account_id) WHERE status IN ('PENDING','RUNNING')` enforces "at most one in-flight import per bank account" at the DB layer. The app-layer rate-limit check is racy — two concurrent uploads can both pass `hasRecentOrInFlightImport` in the same millisecond — and this index closes that race. The service catches the resulting `DataIntegrityViolationException` and re-throws as `CsvImportRateLimitedException`, surfacing the same 429 response. The 7-day COMPLETED cooldown can't move to the index because Postgres forbids non-immutable functions like `NOW()` in partial-index predicates.
+
 **RLS** standard on `user_id`. **Setup-pool grant** — the startup recovery scan runs outside any user context (no JWT at process start), so it goes through the `expense_setup` role which has BYPASSRLS. V29 grants `SELECT, UPDATE` on this table to `expense_setup`; recovery resets stale RUNNING rows + re-kicks-off the `@Async` processor.
 
 Maps to N6, N7, N21.
