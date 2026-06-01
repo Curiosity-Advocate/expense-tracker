@@ -668,6 +668,151 @@ Implements F30.
 
 ---
 
+## Bank Integration (CSV import)
+
+Six endpoints across two URL roots. The connection endpoints manage per-account CSV import configuration; the upload + status endpoints drive the async ingestion pipeline. Architecture is captured in [ADR-0020](../decisions/0020-csv-import-architecture.md).
+
+### Set up CSV import on an account
+
+`POST /api/v1/bank-accounts/{bankAccountId}/csv-import-connection`
+
+Marks a `bank_account` as CSV-importable from a specific bank's export. The bank must match a parser the server knows about — currently one of `cba | anz | ubank | amp | qudos | suncorp`.
+
+**Request:**
+```json
+{ "bankId": "cba", "csvExportUrl": "https://www.commbank.com.au/digital/your-statements" }
+```
+
+- `bankId` — required, one of the six supported codes
+- `csvExportUrl` — optional bookmark, surfaced in the UI when uploading
+
+**Success `201 Created`:**
+```json
+{ "bankAccountId": "...", "bankId": "cba", "csvExportUrl": "...", "lastImportedAt": null, "lastDateTo": null }
+```
+
+**Failures:**
+- 404 `CSV_IMPORT_NOT_CONFIGURED` — bank account unknown or hidden by RLS
+- 409 `CSV_IMPORT_CONNECTION_EXISTS` — connection already set up for this account; PATCH or DELETE+POST instead
+- 422 `UNKNOWN_BANK_ID` — bankId isn't one of the supported parser codes
+
+---
+
+### Read / update / delete a CSV connection
+
+```
+GET    /api/v1/bank-accounts/{bankAccountId}/csv-import-connection
+PATCH  /api/v1/bank-accounts/{bankAccountId}/csv-import-connection
+DELETE /api/v1/bank-accounts/{bankAccountId}/csv-import-connection
+```
+
+**PATCH body** (all fields optional; null/absent = leave unchanged; `csvExportUrl: ""` clears the bookmark):
+```json
+{ "bankId": "anz", "csvExportUrl": "https://www.anz.com.au/..." }
+```
+
+`bankId` is mutable so a user who switches banks (or fixes a setup typo) doesn't need to delete and recreate. Already-imported `raw_bank_transactions` rows keep their original `source_format`; only future imports use the new bank.
+
+**Statuses:** GET → 200 with the resource (404 if not set up). PATCH → 200 with updated resource. DELETE → 204 always (idempotent — silent success even if nothing existed).
+
+---
+
+### Upload a CSV
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant HTTP as HTTP Layer
+    participant Svc as CsvImportService
+    participant Proc as AsyncBatchedCsvImportProcessor
+    participant DB as PostgreSQL
+
+    User->>HTTP: POST /csv-import (multipart: file + exportedOnDate)
+    HTTP->>Svc: upload(bankAccountId, bytes, exportedOnDate, userId)
+    Svc->>DB: Load csv_import_connections (RLS-scoped)
+    alt No connection
+        Svc-->>HTTP: CsvImportNotConfiguredException
+        HTTP-->>User: 404 CSV_IMPORT_NOT_CONFIGURED
+    end
+
+    Svc->>DB: Check csv_imports for RUNNING or recent COMPLETED (imported>0, ≤7d)
+    alt Within 7-day window OR already running
+        Svc-->>HTTP: CsvImportRateLimitedException(nextAllowedAt)
+        HTTP-->>User: 429 CSV_IMPORT_RATE_LIMITED
+    end
+
+    Svc->>Svc: parserRegistry.pickByDate(bankId, exportedOnDate)
+    Svc->>DB: INSERT csv_imports (status=PENDING, bytes, parser_version_tag)
+    Svc->>Proc: kickoff(importId)   // @Async, returns immediately
+    Svc-->>HTTP: CsvImportSubmissionResult
+    HTTP-->>User: 202 Accepted { importId, statusUrl }
+
+    Note over Proc,DB: ── async, on csv-import-* thread ──
+    Proc->>DB: status PENDING→RUNNING + reset counters (setup pool)
+    loop per batch (default 100 rows)
+        Proc->>DB: app pool tx — SET LOCAL app.current_user_id
+        Proc->>DB: INSERT raw_bank_transactions ON CONFLICT DO NOTHING
+        Proc->>DB: INSERT dead_letters for parse failures
+        Proc->>DB: UPDATE csv_imports counters
+    end
+    Proc->>DB: status RUNNING→COMPLETED, clear bytes, update connection.last_*
+```
+
+**Request:** `multipart/form-data` with parts:
+
+| Part | Type | Required | Notes |
+|---|---|---|---|
+| `file` | binary CSV | yes | Max 10 MB (Spring rejects oversized uploads with 413) |
+| `exportedOnDate` | ISO date | no | Drives parser version dispatch; defaults to today if omitted |
+
+**Success `202 Accepted`:**
+```json
+{
+  "importId": "...",
+  "statusUrl": "/api/v1/bank-data/csv-imports/<importId>",
+  "parserVersionTag": "csv_cba_v1",
+  "exportedOnDate": "2026-06-02",
+  "submittedAt": "..."
+}
+```
+
+**Failures:**
+- 404 `CSV_IMPORT_NOT_CONFIGURED` — no CSV connection on this bank account
+- 422 `UNKNOWN_BANK_ID` — no parser handles `(bankId, exportedOnDate)` (e.g. exportedOnDate older than any parser's validFromDate; should be impossible with v1 parsers using LocalDate.MIN)
+- 429 `CSV_IMPORT_RATE_LIMITED` — last successful import was less than 7 days ago, or another import is currently RUNNING. Body includes `nextAllowedAt`.
+- 413 `CSV_IMPORT_FILE_TOO_LARGE` — over the 10 MB cap
+
+---
+
+### Poll import status
+
+`GET /api/v1/bank-data/csv-imports/{importId}`
+
+**Success `200 OK`:**
+```json
+{
+  "importId": "...",
+  "bankAccountId": "...",
+  "status": "RUNNING",
+  "exportedOnDate": "2026-06-02",
+  "parserVersionTag": "csv_cba_v1",
+  "importedCount": 142,
+  "dedupedCount": 0,
+  "parseErrorCount": 1,
+  "lastProcessedRow": 143,
+  "errorMessage": null,
+  "submittedAt": "2026-06-02T08:00:00Z",
+  "startedAt": "2026-06-02T08:00:00.2Z",
+  "completedAt": null
+}
+```
+
+Status values: `PENDING | RUNNING | COMPLETED | FAILED`. Terminal statuses (`COMPLETED`, `FAILED`) have `completedAt` set; `FAILED` also has `errorMessage`. `imported_count`, `dedupedCount`, `parseErrorCount` accumulate as batches commit; on a startup-recovery retry they reset to 0.
+
+**Failures:** 404 `CSV_IMPORT_NOT_CONFIGURED` if the id is unknown or hidden by RLS.
+
+---
+
 ## Error envelope
 
 All error responses share a uniform shape produced by `GlobalExceptionHandler`:
