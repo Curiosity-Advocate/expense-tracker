@@ -5,6 +5,15 @@ spring:
   application:
     name: expense-tracker-api
 
+  # B1 — Multipart limit for the CSV upload endpoint. Bank CSVs for a full
+  # year are typically <500KB; 10MB is plenty of headroom and bounds the
+  # damage from a runaway upload. Spring rejects oversized uploads early
+  # (before the controller method runs) with MaxUploadSizeExceededException.
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
   datasource:
     # Two pools — see ADR-0011 and DataSourceConfig.java.
     # `app` is the primary pool used by every authenticated endpoint. RLS is
@@ -54,6 +63,19 @@ app:
     # matches the v1.0 worst-case window so this is no worse on the slowest path.
     access-token-expiry-minutes: 15
     refresh-token-expiry-days: 7
+
+# B1.4 — Bank integration (CSV import) tuning. Defaults are sized for personal
+# scale (10 users, weekly imports, <5000-row CSVs). See ADR-0020 for the
+# async-with-startup-recovery model.
+bank-integration:
+  csv:
+    # Rows per processor transaction. Smaller = smaller failure blast radius;
+    # larger = fewer commits. 100 is comfortable at our row count.
+    batch-size: 100
+    # On API startup, csv_imports rows in PENDING or RUNNING with
+    # submitted_at older than this are reset to PENDING and re-kicked-off.
+    # 10 minutes is generous — even a 5000-row import shouldn't approach it.
+    stale-running-threshold-minutes: 10
 
 management:
   endpoints:

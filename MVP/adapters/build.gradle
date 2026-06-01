@@ -13,5 +13,14 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
+    // B1 — Jackson for serialising parsed CSV rows into raw_bank_transactions's
+    // JSONB column. starter-json brings databind + the JavaTimeModule we need
+    // for LocalDate without pulling in the full web starter.
+    implementation 'org.springframework.boot:spring-boot-starter-json'
+
+    // B1 — OpenCSV for parsing bank CSV exports. Streaming reader so a
+    // large file doesn't load fully into memory before parsing starts.
+    implementation 'com.opencsv:opencsv:5.9'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
