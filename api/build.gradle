@@ -17,6 +17,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-aop'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    // For RlsSessionAspect (EntityManager) + @EnableTransactionManagement / @Transactional.
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 
     // Live Swagger UI — the demo layer since there is no frontend
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
