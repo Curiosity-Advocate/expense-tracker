@@ -40,7 +40,7 @@ The goal was: shorten the stolen-token window without forcing users to re-authen
 - `enforce_immutability_except('revoked_at', 'revoke_reason')` — JSONB diff catches any column drift, including columns added by future migrations (fail-closed)
 - `enforce_set_once_column('revoked_at')` — even within allowed columns, revocation is one-way
 
-**Two pools.** Refresh and logout run on the setup pool (`expense_setup`, BYPASSRLS) because the token-hash lookup happens before any `UserPrincipal` exists. The chicken-and-egg of "find the row to know the user, but RLS needs the user first" forces this. See [ADR-0011](0011-three-layer-rls-defence.md).
+**Two pools.** Refresh and logout run on the setup pool because the token-hash lookup happens before any `UserPrincipal` exists. The chicken-and-egg of "find the row to know the user, but RLS needs the user first" forces this. The setup pool's bypass mechanism (BYPASSRLS in the v2.0 design; owner-bypass under the Option-A pivot for managed Postgres) is described in [ADR-0011](0011-three-layer-rls-defence.md).
 
 **Stolen-token window comparison:**
 

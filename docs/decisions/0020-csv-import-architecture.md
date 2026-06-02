@@ -137,7 +137,7 @@ The async boundary means the upload request is gone by the time the processor ru
 
 On API startup, `CsvImportStartupRecovery` (`ApplicationRunner`) scans `csv_imports` for rows in PENDING or RUNNING with `submitted_at < NOW() - stale_threshold` (default 10 minutes). For each match: reset to PENDING + clear `started_at` + zero counters, then call `processor.kickoff(importId)`.
 
-The scan runs without any user context (there's no JWT at process start), so it goes through the **setup pool** (BYPASSRLS) — V29 grants `SELECT, UPDATE` on `csv_imports` to `expense_setup` for exactly this case. The actual import work then runs on the **app pool** with `app.current_user_id` set from each row's `user_id` (the processor does this as the first statement of every batch transaction).
+The scan runs without any user context (there's no JWT at process start), so it goes through the **setup pool** (RLS-bypassing — BYPASSRLS in the v2.0 design, owner-bypass under the Option-A pivot for managed Postgres; see [ADR-0011](0011-three-layer-rls-defence.md)). V29 grants `SELECT, UPDATE` on `csv_imports` to `expense_setup`; those grants are vestigial under Option A but kept to document intent. The actual import work then runs on the **app pool** with `app.current_user_id` set from each row's `user_id` (the processor does this as the first statement of every batch transaction).
 
 ## Consequences
 
@@ -152,7 +152,7 @@ The scan runs without any user context (there's no JWT at process start), so it 
 **Negative:**
 
 - The module is **untested at the parser-correctness level for ANZ, AMP, and Suncorp** — those parsers used best-guess formats during B1.4 and need real CSV samples to verify. CBA, Ubank, and Qudos parsers have unit tests against verified samples.
-- The setup pool's `BYPASSRLS` reach grew to include `csv_imports` (was only `users`, `bank_accounts`, `user_login_failures`, `refresh_tokens`, `sudo_tokens` for the auth flows). Each addition needs scrutiny — see ADR-0011.
+- The setup pool's RLS-bypass reach grew to include `csv_imports` (was only `users`, `bank_accounts`, `user_login_failures`, `refresh_tokens`, `sudo_tokens` for the auth flows). Each addition needs scrutiny — see ADR-0011. Under the Option-A pivot the per-table grants are vestigial (owner-bypass is unconditional), which makes this point *more* important: the audit lives in the migration files, not in Postgres-enforced permissions.
 - Startup recovery resets counters to 0 on retry, which means displayed `dedupedCount` after a retry is inflated (counts re-imports of previously-inserted rows as dedupes). Documented behaviour; acceptable for personal scale.
 
 **Neutral:**
@@ -177,5 +177,5 @@ The scan runs without any user context (there's no JWT at process start), so it 
 | Hash chain location | DB trigger | Application code |
 | Hash chain serialisation | Per-user advisory lock | `SERIALIZABLE` isolation; `SELECT FOR UPDATE` |
 | CSV byte storage | DB BYTEA | In-memory; filesystem; S3 |
-| Startup recovery access | Setup pool (BYPASSRLS) | Superuser; new dedicated pool |
+| Startup recovery access | Setup pool (RLS-bypassing — see ADR-0011) | Superuser; new dedicated pool |
 | Module boundary enforcement | ArchUnit (compile-checked) | Conventions only |

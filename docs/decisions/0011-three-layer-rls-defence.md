@@ -57,6 +57,26 @@ The security boundary is regression-tested by `PoolIsolationIntegrationTest` (`a
 
 **v2.0 fix (S1, V20).** Two pools, `RoleElevationService` deleted, membership revoked. The textbook-secure version that the v1.0 ADR pointed to as future work.
 
+**v2.0 deploy pivot — Option A (Render free tier).** The v2.0 design depends on the bootstrap user being able to grant `BYPASSRLS`. PostgreSQL only allows BYPASSRLS to be granted by a role that itself has BYPASSRLS — which on managed providers (Render, AWS RDS, GCP Cloud SQL, Supabase, Neon free tier) means a true superuser. None of them give you superuser. So `CREATE ROLE expense_setup … BYPASSRLS` in V17 hard-fails on every managed Postgres.
+
+Three options were on the table when this surfaced during the first Render deploy:
+
+- **A — Setup pool connects as the table-owner role.** Postgres skips RLS automatically for table owners (unless `FORCE ROW LEVEL SECURITY` is set on the table, which this codebase does not use). The dedicated `expense_setup` role is preserved in the migrations as a NOLOGIN audit artifact — the grants to it document *which tables* the pre-auth flows are supposed to touch — but nothing connects as it at runtime.
+- B — Self-host Postgres (Render Docker, Fly.io, a VPS) to recover superuser.
+- C — Collapse to a single pool and rely on Layer 1+2+3 alone.
+
+Picked A. Reasoning: MVP/resume project, deployability on Render free tier is the constraint that frames everything else; A is the only option that ships without changing the deployment target; B and C are days of additional work each.
+
+**Security trade-off acknowledged.** The setup pool now holds master-DB credentials rather than the narrowly-scoped expense_setup privileges (which were `SELECT/INSERT/UPDATE` on `users`, `INSERT` on `bank_accounts`, `SELECT/INSERT` on `user_login_failures`, plus the later V21/V29 grants for `refresh_tokens` and `csv_imports`). A SQL-injection bug in `register`, `login`, `setupNewUser`, `refresh`, `logout`, or the CSV startup-recovery query would, under Option A, expose every table — not just the granted subset. The attack *vector* is unchanged (the same set of hand-written queries on `setupJdbcTemplate`); only the blast radius is larger. This is the cost of running on managed Postgres without superuser.
+
+**What stays valid:**
+- Layers 1–3 of the core defence are unchanged. RLS still applies to the app pool (which connects as `expense_app`, a non-owner, non-BYPASSRLS role).
+- `RlsSessionAspect` still skips setup-pool transactions (owner-bypass already covers them).
+- `expense_app` still has no path to escalate; V20's `REVOKE expense_setup FROM expense_app` is still in effect.
+- `PoolIsolationIntegrationTest`'s contract — app pool returns zero rows without `app.current_user_id`, setup pool can read/write without it — still holds (the mechanism shifts from BYPASSRLS to owner-bypass, but the observable behavior is identical).
+
+**Reversion path.** If/when the deployment moves to self-hosted Postgres, restore V17 to its v2.0 form (`CREATE ROLE expense_setup NOLOGIN BYPASSRLS`) and V20 to its v2.0 form (`ALTER ROLE expense_setup LOGIN PASSWORD '${db_setup_password}'`), repoint the setup pool's `username`/`password` in `application.yml` to `expense_setup`/`${DB_SETUP_PASSWORD}`, and add `DB_SETUP_PASSWORD` back to `render.yaml` (or the new infra's secret store). Nothing else changes — the app/aspect/ADR contracts were written to be agnostic to the bypass mechanism.
+
 ## Alternatives considered
 
 - **Application-only filtering (Layer 1 alone).** Rejected — one bug leaks data.

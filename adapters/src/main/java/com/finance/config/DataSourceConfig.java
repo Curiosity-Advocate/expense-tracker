@@ -21,13 +21,15 @@ import javax.sql.DataSource;
 // repository keeps working without any annotation changes.
 //
 // `setup` is a separate pool used only by the three pre-authentication methods
-// — register, login, setupNewUser. It connects as expense_setup (BYPASSRLS).
-// expense_app has no membership in expense_setup as of V20, so a SQL injection
-// through the app pool cannot reach the setup pool's privileges.
+// — register, login, setupNewUser. Under the Option-A pivot (ADR-0011) it
+// connects as the table-owner role (the same role Flyway runs as), which
+// Postgres auto-bypasses RLS for. The v2.0 design used a BYPASSRLS expense_setup
+// role here, but managed Postgres providers refuse to grant BYPASSRLS so we
+// fall back to owner-based bypass.
 //
 // Access to the setup pool is exclusively through `setupJdbcTemplate`. We do
 // NOT bind it to JPA — keeping it on plain JdbcTemplate means the only SQL
-// that ever runs against expense_setup is the SQL these three methods write
+// that ever runs through this pool is the SQL these three methods write
 // explicitly. No surprise lazy loads, no entity-graph traversals.
 @Configuration
 public class DataSourceConfig {

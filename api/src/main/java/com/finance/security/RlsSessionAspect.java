@@ -27,9 +27,10 @@ import java.lang.reflect.Method;
 // into the next request's connection.
 //
 // Setup-pool methods (@Transactional("setupTransactionManager")) are explicitly
-// skipped — they connect as expense_setup which has BYPASSRLS, so the session
-// variable is irrelevant, and the aspect's EntityManager is bound to the app
-// pool anyway. Running it would do work on the wrong connection. See ADR-0011.
+// skipped — they connect as the table-owner role (Option-A pivot, ADR-0011),
+// so Postgres skips RLS automatically and the session variable is irrelevant.
+// The aspect's EntityManager is bound to the app pool anyway, so running it
+// would do work on the wrong connection.
 @Aspect
 @Component
 @Order(2)

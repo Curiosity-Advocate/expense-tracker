@@ -19,9 +19,10 @@ import java.util.UUID;
 // in-memory @Async work is gone; the row would otherwise sit in RUNNING
 // (or never-started PENDING) forever.
 //
-// Runs through the setup pool (BYPASSRLS) since there's no user context at
-// startup. V29 grants SELECT + UPDATE on csv_imports to expense_setup for
-// exactly this case.
+// Runs through the setup pool (owner-bypass — see ADR-0011) since there's
+// no user context at startup. V29 grants SELECT + UPDATE on csv_imports to
+// expense_setup; under the Option-A pivot those grants are vestigial (the
+// pool connects as the table owner) but kept to document intent.
 //
 // Eligibility predicate: status IN ('PENDING','RUNNING') AND submitted_at <
 // NOW() - staleThreshold. Catches both crashed-RUNNING and abandoned-PENDING

@@ -30,9 +30,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 // All three pre-auth flows (register, login, refresh) and logout route through
-// setupJdbcTemplate on the setup pool. expense_setup has BYPASSRLS, which is
-// required because /refresh and /logout look up rows by token_hash before any
-// UserPrincipal is in scope — RLS would otherwise hide the row. See ADR-0011.
+// setupJdbcTemplate on the setup pool. The setup pool connects as the table
+// owner (Option-A pivot, ADR-0011), so Postgres skips RLS — required because
+// /refresh and /logout look up rows by token_hash before any UserPrincipal is
+// in scope. RLS would otherwise hide the row.
 @Service
 public class PostgresAuthService implements AuthService {
 
