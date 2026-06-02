@@ -28,7 +28,10 @@ COPY --from=build /workspace/api/build/libs/*.jar app.jar
 
 EXPOSE 8080
 
-# Allow JVM heap tuning via env var for Render's free tier (512 MB RAM)
-ENV JAVA_OPTS="-Xmx400m -Xss512k -XX:+UseContainerSupport"
+# Render free tier = 512 MB total. JVM non-heap (metaspace, code cache,
+# threads, native, GC, JIT) on a Spring Boot 3.x app with web + security
+# + JPA + Flyway + Swagger is ~200 MB. 256 MB heap leaves ~50 MB OS
+# headroom; tighter than ideal but works. Bump if/when on a larger plan.
+ENV JAVA_OPTS="-Xmx256m -Xss512k -XX:+UseContainerSupport"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
