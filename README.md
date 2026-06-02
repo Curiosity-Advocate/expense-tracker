@@ -1,3 +1,338 @@
+# Getting Started
+
+## Prerequisites
+
+| Tool | Version | Why |
+|---|---|---|
+| **JDK** | 21 | Project's Gradle toolchain target |
+| **Docker** | any recent | Runs PostgreSQL (and MailHog for local dev) via `docker-compose` |
+| **Gradle** | 8.9 (bundled wrapper) | Build + run; just use `./gradlew` — don't install separately |
+| **curl** (or any HTTP client) | any | For hitting the API in the walkthrough below; Swagger UI works just as well |
+| **jq** | optional | Makes the walkthrough's `$ACCESS_TOKEN=$(... | jq -r ...)` patterns work |
+
+If you don't have JDK 21: install via [SDKMAN](https://sdkman.io/) (`sdk install java 21-tem`) or [Homebrew](https://brew.sh/) (`brew install openjdk@21`). Gradle's toolchain feature can also auto-provision JDK 21 via Foojay if your `~/.gradle/init.gradle` enables the resolver plugin — but the explicit install is the most reliable path.
+
+## Setup
+
+```bash
+# 1. Clone (or you already have the repo)
+git clone <your-fork-url> expense-tracker
+cd expense-tracker
+
+# 2. Copy the env template and fill in real values
+cp .env.example .env
+# Edit .env:
+#   - Generate a JWT_SECRET with: openssl rand -hex 32
+#   - Set DB passwords (any value; the init-db script picks them up)
+
+# 3. Start Postgres + MailHog
+docker compose up -d
+
+# Verify Postgres is healthy
+docker compose ps
+docker exec expense-tracker-db psql -U postgres -d expense_db -c "\du"
+
+# 4. Run the API (it runs Flyway migrations at startup)
+./gradlew :api:bootRun
+
+# In a separate terminal: run the worker (cron jobs)
+./gradlew :worker:bootRun
+```
+
+The API listens on **`http://localhost:8080`** by default. The worker has no HTTP server.
+
+## Verify
+
+| What | URL / Command |
+|---|---|
+| Swagger UI (interactive API explorer) | http://localhost:8080/swagger-ui.html |
+| OpenAPI JSON | http://localhost:8080/api-docs |
+| Health check | `curl http://localhost:8080/actuator/health` |
+| MailHog (for v1.1 #4 job-failure email alerts in dev) | http://localhost:8025 |
+| Postgres role check | `docker exec -it expense-tracker-db psql -U postgres -d expense_db -c "\du"` |
+
+If the API logs show `Flyway: Successfully applied N migrations` and Swagger UI loads, you're good.
+
+## Running the tests
+
+```bash
+./gradlew test
+```
+
+Integration tests use Testcontainers and need Docker running. First run pulls the `postgres:16-alpine` image; subsequent runs reuse it.
+
+---
+
+# API Examples — End-to-End Walkthrough
+
+> **Swagger UI is the primary discovery tool.** Open http://localhost:8080/swagger-ui.html and you'll find every endpoint documented with try-it-now forms. The curl examples below are for command-line scripting and showing the typical request/response sequence in one place.
+
+The walkthrough below follows a realistic user journey: **register → login → set up profile → categories → expenses → summary → targets → CSV bank import → logout**. Each step shows the curl command, key parts of the response, and what to carry forward.
+
+Set up a shell variable so the rest of the walkthrough is copy-pasteable:
+
+```bash
+BASE=http://localhost:8080/api/v1
+```
+
+## 1. Register a new user
+
+```bash
+curl -s -X POST "$BASE/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "alice",
+    "email":    "alice@example.com",
+    "password": "correct_horse_battery_staple"
+  }' | jq .
+```
+
+Response (`201 Created`):
+```json
+{ "data": { "userId": "...", "username": "alice", "email": "alice@example.com", "createdAt": "..." } }
+```
+
+## 2. Login
+
+```bash
+RESP=$(curl -s -X POST "$BASE/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{ "username": "alice", "password": "correct_horse_battery_staple" }')
+
+ACCESS=$(echo  "$RESP" | jq -r '.data.accessToken')
+REFRESH=$(echo "$RESP" | jq -r '.data.refreshToken')
+
+echo "access expires at: $(echo $RESP | jq -r '.data.accessTokenExpiresAt')"
+```
+
+Response (`200 OK`):
+```json
+{ "data": {
+    "accessToken":            "eyJhbGciOi...",
+    "accessTokenExpiresAt":   "2026-06-02T10:15:00Z",
+    "refreshToken":           "5RmA...",
+    "refreshTokenExpiresAt":  "2026-06-09T10:00:00Z",
+    "tokenType":              "Bearer"
+} }
+```
+
+Capture `accessToken` — every subsequent call needs `Authorization: Bearer $ACCESS`.
+
+## 3. Get your profile
+
+```bash
+curl -s "$BASE/users/me" -H "Authorization: Bearer $ACCESS" | jq .
+```
+
+Response: `{ "data": { "userId": "...", "username": "alice", "email": "alice@example.com", "isDiscoverable": false, "createdAt": "..." } }`
+
+## 4. Update profile (opt in to delegation)
+
+Other users can only grant you access if you've set `isDiscoverable = true`.
+
+```bash
+curl -s -X PATCH "$BASE/users/me" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -d '{ "isDiscoverable": true }' | jq .
+```
+
+## 5. List categories
+
+System categories are pre-seeded (UNCATEGORISED, GROCERIES, DINING, TRANSPORT, UTILITIES, RENT, ENTERTAINMENT, HEALTHCARE). RLS shows you those plus any you've created.
+
+```bash
+curl -s "$BASE/categories" -H "Authorization: Bearer $ACCESS" | jq '.data[] | .name'
+```
+
+## 6. Create a private category
+
+```bash
+curl -s -X POST "$BASE/categories" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -d '{ "name": "COFFEE", "description": "My morning vice" }' | jq .
+```
+
+## 7. List your bank accounts
+
+At registration, every user gets system `CASH` and `CRYPTO` accounts created automatically. To get a `BANK` or `CREDIT_CARD` account, you currently insert one via the DB (v2.1 will add an endpoint).
+
+```bash
+curl -s "$BASE/bank-accounts" -H "Authorization: Bearer $ACCESS" | jq .
+# Capture the CASH account's id for the expense calls
+CASH_ID=$(curl -s "$BASE/bank-accounts" -H "Authorization: Bearer $ACCESS" \
+          | jq -r '.data[] | select(.accountType == "CASH") | .id')
+```
+
+## 8. Create a manual expense
+
+```bash
+curl -s -X POST "$BASE/expenses" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d "{
+    \"amount\":         42.50,
+    \"merchantName\":   \"Woolworths\",
+    \"expenseDate\":    \"2026-06-01\",
+    \"categories\":     [\"GROCERIES\"],
+    \"notes\":          \"Weekly shop\",
+    \"paymentMethod\":  \"CREDIT_CARD\",
+    \"bankAccountId\":  \"$CASH_ID\"
+  }" | jq .
+```
+
+Response (`201 Created`) returns the full expense with server-computed even split across categories.
+
+## 9. List expenses with filters
+
+```bash
+curl -s "$BASE/expenses?dateFrom=2026-06-01&dateTo=2026-06-30&categories=GROCERIES&pageSize=10" \
+  -H "Authorization: Bearer $ACCESS" | jq .
+```
+
+## 10. Get expense summary
+
+```bash
+curl -s "$BASE/expenses/summary?dateFrom=2026-06-01&dateTo=2026-06-30&groupBy=CATEGORY" \
+  -H "Authorization: Bearer $ACCESS" | jq .
+```
+
+`dataFreshAsOf` in the response is the materialised view's last refresh time.
+
+## 11. Update an expense
+
+```bash
+EXPENSE_ID=...    # from the create response
+EXPENSE_DATE=2026-06-01
+
+curl -s -X PATCH "$BASE/expenses/$EXPENSE_ID?expenseDate=$EXPENSE_DATE" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -d '{ "notes": "Weekly shop + Sunday extras" }' | jq .
+```
+
+Bank-imported expenses reject updates to `amount`, `merchantName`, `expenseDate`, and `paymentMethod` (returns `422 FIELD_IMMUTABLE_FOR_BANK_IMPORT`).
+
+## 12. Create a target
+
+```bash
+GROCERIES_ID=$(curl -s "$BASE/categories" -H "Authorization: Bearer $ACCESS" \
+               | jq -r '.data[] | select(.name == "GROCERIES") | .id')
+
+curl -s -X POST "$BASE/targets" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -d "{
+    \"targetType\":   \"CATEGORY\",
+    \"amount\":       400.00,
+    \"periodYear\":   2026,
+    \"periodMonth\":  6,
+    \"categories\":   [{ \"categoryId\": \"$GROCERIES_ID\", \"participation\": \"INCLUSIVE\" }]
+  }" | jq .
+```
+
+## 13. Get target status (with prediction)
+
+```bash
+TARGET_ID=...    # from the create response above
+curl -s "$BASE/targets/$TARGET_ID/status" -H "Authorization: Bearer $ACCESS" | jq .
+```
+
+Response includes current spend, naive daily-rate projection, and a `confidence` (LOW / MEDIUM / HIGH) based on how much of the period has elapsed.
+
+## 14. Set up CSV import on a bank account (v2.0 B1)
+
+Need a `BANK` or `CREDIT_CARD` account first. For now insert one via psql:
+
+```bash
+docker exec -it expense-tracker-db psql -U postgres -d expense_db -c \
+  "INSERT INTO bank_accounts (id, user_id, name, account_type, is_system) VALUES (gen_random_uuid(), (SELECT id FROM users WHERE username='alice'), 'My CBA Everyday', 'BANK', FALSE);"
+
+BANK_ACC_ID=$(curl -s "$BASE/bank-accounts" -H "Authorization: Bearer $ACCESS" \
+              | jq -r '.data[] | select(.accountType == "BANK") | .id')
+
+curl -s -X POST "$BASE/bank-accounts/$BANK_ACC_ID/csv-import-connection" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ACCESS" \
+  -d '{
+    "bankId":       "cba",
+    "csvExportUrl": "https://www.commbank.com.au/digital/your-statements"
+  }' | jq .
+```
+
+Supported `bankId` values: `cba`, `anz`, `ubank`, `amp`, `qudos`, `suncorp`.
+
+## 15. Upload a CSV
+
+```bash
+# Get a sample CSV from your bank, or use the test sample bundled in the repo
+SAMPLE=api/src/test/resources/csv-samples/cba-sample.csv
+
+UPLOAD=$(curl -s -X POST "$BASE/bank-accounts/$BANK_ACC_ID/csv-import" \
+  -H "Authorization: Bearer $ACCESS" \
+  -F "file=@$SAMPLE" \
+  -F "exportedOnDate=2026-06-01")
+
+echo "$UPLOAD" | jq .
+IMPORT_ID=$(echo "$UPLOAD" | jq -r '.importId')
+```
+
+Response (`202 Accepted`):
+```json
+{
+  "importId":         "...",
+  "statusUrl":        "/api/v1/bank-data/csv-imports/...",
+  "parserVersionTag": "csv_cba_v1",
+  "exportedOnDate":   "2026-06-01",
+  "submittedAt":      "..."
+}
+```
+
+## 16. Poll import status
+
+```bash
+while true; do
+  STATUS=$(curl -s "$BASE/bank-data/csv-imports/$IMPORT_ID" -H "Authorization: Bearer $ACCESS")
+  STATE=$(echo "$STATUS" | jq -r '.status')
+  echo "$STATE — imported=$(echo $STATUS | jq -r .importedCount), errors=$(echo $STATUS | jq -r .parseErrorCount)"
+  [ "$STATE" = "COMPLETED" ] || [ "$STATE" = "FAILED" ] && break
+  sleep 1
+done
+
+echo "$STATUS" | jq .
+```
+
+Rate-limit: only one import per account per 7 days (after a successful import with `imported_count > 0`).
+
+## 17. Refresh your access token (before it expires)
+
+Access tokens are 15-minute lived; refresh tokens are 7 days.
+
+```bash
+RESP=$(curl -s -X POST "$BASE/auth/refresh" \
+  -H "Content-Type: application/json" \
+  -d "{ \"refreshToken\": \"$REFRESH\" }")
+
+ACCESS=$(echo  "$RESP"  | jq -r '.data.accessToken')
+REFRESH=$(echo "$RESP" | jq -r '.data.refreshToken')   # ← refresh token ALSO rotates
+```
+
+The presented refresh token is marked `ROTATED` and a new one is issued; presenting the old one again triggers reuse detection and revokes every active token in your session chain.
+
+## 18. Logout
+
+```bash
+curl -s -X POST "$BASE/auth/logout" \
+  -H "Content-Type: application/json" \
+  -d "{ \"refreshToken\": \"$REFRESH\" }"
+```
+
+Returns `204 No Content` whether the token was active, already revoked, or unknown (silent — see [api-contract.md](docs/architecture/api-contract.md) for the rationale).
+
+---
+
 # Table of Contents
 * [What Is the Problem ?](#what-is-the-problem-)
   * [Background](#background)
