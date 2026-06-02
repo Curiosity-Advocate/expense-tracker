@@ -6,7 +6,9 @@ dependencies {
     // BOM import pins all Spring Boot dependency versions.
     implementation platform('org.springframework.boot:spring-boot-dependencies:3.3.0')
 
-    // adapters brings :core transitively, plus JPA / Postgres / Flyway / security-crypto.
+    // Explicit: api imports core types directly. `implementation` deps
+    // don't transit through adapters, so :core must be declared here too.
+    implementation project(':core')
     implementation project(':adapters')
 
     // HTTP + AOP + Validation + Security live here because Spring (and Spring MVC
