@@ -11,8 +11,8 @@
 -- See ADR-0011 "Setup-pool RLS bypass" section.
 --
 -- Resolution: the setup pool now connects as the table-owner role (the same
--- role that Flyway runs as, i.e. ${DB_SUPERUSER_USERNAME}). Postgres skips
--- RLS automatically for table owners unless FORCE ROW LEVEL SECURITY is set,
+-- role that Flyway runs as, i.e. the DB_SUPERUSER_USERNAME role). Postgres
+-- skips RLS automatically for table owners unless FORCE ROW LEVEL SECURITY is set,
 -- which we don't use. The expense_setup role is preserved here (NOLOGIN, no
 -- BYPASSRLS) so later migrations' GRANTs to it still resolve — but nothing
 -- connects as it at runtime.
