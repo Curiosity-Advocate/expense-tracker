@@ -54,10 +54,20 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint))
+                // Order matters here, but NOT for runtime filter order (that's
+                // decided by the computed order numbers below). It matters because
+                // Spring Security's addFilterBefore/After(anchor) requires the
+                // anchor class to already be registered in the filter-order map.
+                // A custom filter's class is only registered once IT is added
+                // relative to a built-in anchor. So jwtFilter must be added first
+                // (anchored on the built-in UsernamePasswordAuthenticationFilter);
+                // only then can traceIdFilter / asUserIdFilter anchor on
+                // JwtAuthenticationFilter.class without throwing
+                // "does not have a registered order".
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 // TraceIdFilter must run before JwtAuthenticationFilter so the trace ID
                 // is set in MDC for every log line, including auth failures.
                 .addFilterBefore(traceIdFilter, JwtAuthenticationFilter.class)
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 // D3 — AsUserIdFilter substitutes the principal for delegated
                 // requests. Runs AFTER JwtAuthenticationFilter (needs the JWT-derived
                 // principal in SecurityContext to validate against).
