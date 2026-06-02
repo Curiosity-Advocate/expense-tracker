@@ -24,5 +24,9 @@ Thumbs.db
 .env.*
 !.env.example
 
-$ --- Hidden Notes
+# --- Hidden Notes ---
 Hidden/*
+
+# --- Claude Code local settings ---
+# Per-machine permission allow-list with absolute paths; not meant to be shared.
+.claude/settings.local.json
