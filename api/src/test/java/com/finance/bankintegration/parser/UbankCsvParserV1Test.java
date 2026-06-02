@@ -78,17 +78,19 @@ class UbankCsvParserV1Test {
     private record RowFailure(int rowNumber, String rawLine, String message) {}
 
     private List<ParsedCsvRow> parseResource(String classpath, List<RowFailure> failures) {
-        try (Reader r = new InputStreamReader(new ClassPathResource(classpath).getInputStream(), StandardCharsets.UTF_8);
-             Stream<ParsedCsvRow> stream = parser.parse(r, sink(failures))) {
-            return stream.toList();
+        try {
+            Reader r = new InputStreamReader(new ClassPathResource(classpath).getInputStream(), StandardCharsets.UTF_8);
+            try (Stream<ParsedCsvRow> stream = parser.parse(r, sink(failures))) {
+                return stream.toList();
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
     private List<ParsedCsvRow> parseString(String csv, List<RowFailure> failures) {
-        try (Reader r = new java.io.StringReader(csv);
-             Stream<ParsedCsvRow> stream = parser.parse(r, sink(failures))) {
+        Reader r = new java.io.StringReader(csv);
+        try (Stream<ParsedCsvRow> stream = parser.parse(r, sink(failures))) {
             return stream.toList();
         }
     }
