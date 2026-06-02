@@ -45,6 +45,12 @@ services:
         sync: false
       - key: DB_SUPERUSER_PASSWORD
         sync: false
+      # Setup pool password (V20 creates the BYPASSRLS expense_setup role
+      # using this as a Flyway placeholder; application.yml's setup datasource
+      # connects with the same value). generateValue creates a stable random
+      # value on first deploy and reuses it on subsequent deploys.
+      - key: DB_SETUP_PASSWORD
+        generateValue: true
       - key: JWT_SECRET
         generateValue: true
       - key: PORT
