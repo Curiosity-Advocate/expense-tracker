@@ -7,4 +7,11 @@
 -- API callers are required to send expense_date as the date in UTC.
 -- Hikari's connection-init-sql in application.yml re-asserts the same setting
 -- per connection as a second layer of defence.
-ALTER DATABASE current_database() SET timezone TO 'UTC';
+-- ALTER DATABASE requires a literal name, not a function call (rejected by
+-- Postgres 18 — earlier versions parsed it but never honoured it). Wrap in
+-- a DO block so the current DB name is resolved at runtime and injected.
+DO $$
+BEGIN
+    EXECUTE 'ALTER DATABASE ' || quote_ident(current_database()) || ' SET timezone TO ''UTC''';
+END;
+$$;
