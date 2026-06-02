@@ -13,6 +13,19 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
+    // JJWT — used by JwtService (moved here from api in the circular-dep
+    // fix, commit 0db9a8b). api also declares these for the same artifacts;
+    // Gradle dedupes at packaging.
+    implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    runtimeOnly  'io.jsonwebtoken:jjwt-impl:0.12.6'
+    runtimeOnly  'io.jsonwebtoken:jjwt-jackson:0.12.6'
+
+    // Jakarta Bean Validation — used by @ConfigurationProperties records
+    // (JwtProperties, BankIntegrationProperties) for @NotBlank/@Min/@Max/@Size.
+    // The starter brings the API at compile time plus Hibernate Validator at
+    // runtime, so @Validated actually triggers checks on bean creation.
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
     // B1 — Jackson for serialising parsed CSV rows into raw_bank_transactions's
     // JSONB column. starter-json brings databind + the JavaTimeModule we need
     // for LocalDate without pulling in the full web starter.
