@@ -7,6 +7,7 @@ COPY gradle gradle
 COPY settings.gradle settings.gradle
 COPY build.gradle build.gradle
 COPY core/build.gradle core/build.gradle
+COPY adapters/build.gradle adapters/build.gradle
 COPY api/build.gradle api/build.gradle
 COPY worker/build.gradle worker/build.gradle
 
@@ -14,6 +15,7 @@ RUN chmod +x gradlew
 RUN ./gradlew dependencies --no-daemon -q 2>/dev/null || true
 
 COPY core core
+COPY adapters adapters
 COPY api api
 
 RUN ./gradlew :api:bootJar --no-daemon -x test

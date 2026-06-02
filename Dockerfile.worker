@@ -6,6 +6,7 @@ COPY gradle gradle
 COPY settings.gradle settings.gradle
 COPY build.gradle build.gradle
 COPY core/build.gradle core/build.gradle
+COPY adapters/build.gradle adapters/build.gradle
 COPY api/build.gradle api/build.gradle
 COPY worker/build.gradle worker/build.gradle
 
