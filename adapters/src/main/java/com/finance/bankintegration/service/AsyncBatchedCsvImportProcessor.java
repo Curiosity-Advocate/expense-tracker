@@ -23,7 +23,6 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -71,7 +70,6 @@ public class AsyncBatchedCsvImportProcessor implements CsvImportProcessor {
     private final DeadLetterRepository           deadLetterRepo;
     private final ObjectMapper                   objectMapper;
     private final BankIntegrationProperties      props;
-    private final Clock                          clock;
 
     public AsyncBatchedCsvImportProcessor(
             @org.springframework.beans.factory.annotation.Qualifier("setupJdbcTemplate") NamedParameterJdbcTemplate setupJdbc,
@@ -82,8 +80,7 @@ public class AsyncBatchedCsvImportProcessor implements CsvImportProcessor {
             RawBankTransactionRepository rawRepo,
             DeadLetterRepository deadLetterRepo,
             ObjectMapper objectMapper,
-            BankIntegrationProperties props,
-            Clock clock) {
+            BankIntegrationProperties props) {
         this.setupJdbc      = setupJdbc;
         this.appJdbc        = appJdbc;
         this.appTx          = new TransactionTemplate(appTxManager);
@@ -92,7 +89,6 @@ public class AsyncBatchedCsvImportProcessor implements CsvImportProcessor {
         this.deadLetterRepo = deadLetterRepo;
         this.objectMapper   = objectMapper;
         this.props          = props;
-        this.clock          = clock;
     }
 
     @Async(AsyncExecutorConfig.CSV_IMPORT_EXECUTOR)
@@ -169,8 +165,12 @@ public class AsyncBatchedCsvImportProcessor implements CsvImportProcessor {
             lastRowNumberSeen[0] = Math.max(lastRowNumberSeen[0], rowNumber);
         };
 
-        try (Reader reader = new InputStreamReader(new ByteArrayInputStream(ctx.rawCsvBytes()), StandardCharsets.UTF_8);
-             Stream<ParsedCsvRow> stream = parser.parse(reader, sink)) {
+        // Reader is not in try-with-resources because the parser's Stream
+        // owns it (via Stream.onClose()) and closing it twice surfaces a
+        // checked IOException from Reader.close() that the compiler can't
+        // see is benign.
+        Reader reader = new InputStreamReader(new ByteArrayInputStream(ctx.rawCsvBytes()), StandardCharsets.UTF_8);
+        try (Stream<ParsedCsvRow> stream = parser.parse(reader, sink)) {
 
             Iterator<ParsedCsvRow> it = stream.iterator();
             int rowOrdinal = 0;
