@@ -4,27 +4,39 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-// One Postgres container per JVM, shared across every IntegrationTestBase subclass.
-// withReuse(true) keeps the container alive between test runs locally if
-// Testcontainers' reuse flag is enabled in ~/.testcontainers.properties.
+// Singleton Postgres container, shared by every integration test class in the JVM.
 //
-// The init script creates expense_app before Flyway runs. Flyway then runs
-// V1–V20 as the superuser, which creates expense_setup (V17) and gives it
-// LOGIN + password (V20). After this, both application pools can connect.
+// IMPORTANT: this uses the manual singleton-container pattern, NOT the
+// JUnit @Testcontainers/@Container lifecycle. With @Container on a static field
+// in a *shared base class*, JUnit starts the container for the first test class
+// and STOPS it when that class finishes — but Spring's TestContext framework
+// caches the ApplicationContext (and the Hikari pools bound to the then-current
+// mapped port) and reuses it for later test classes. Those classes then hit a
+// dead port → "Connection refused" / CannotGetJdbcConnectionException. Starting
+// the container once in a static initializer and never stopping it
+// (Testcontainers' Ryuk sidecar reaps it on JVM exit) keeps the mapped port
+// stable for every cached context.
+//
+// test-init.sql creates the expense_app login role before Flyway runs. Flyway
+// then runs as the container superuser (postgres). Under the Option-A pivot
+// (ADR-0011) the setup pool connects as that superuser (DB_SUPERUSER_*), which
+// bypasses RLS; the app pool connects as the non-superuser expense_app, which
+// RLS isolates. DB_SETUP_PASSWORD is vestigial post-pivot but still supplied so
+// the Flyway placeholder resolves.
 @SpringBootTest
-@Testcontainers
 public abstract class IntegrationTestBase {
 
-    @Container
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
-            .withDatabaseName("test")
-            .withUsername("postgres")
-            .withPassword("test_superuser_password")
-            .withInitScript("test-init.sql")
-            .withReuse(true);
+    static final PostgreSQLContainer<?> POSTGRES =
+            new PostgreSQLContainer<>("postgres:16-alpine")
+                    .withDatabaseName("test")
+                    .withUsername("postgres")
+                    .withPassword("test_superuser_password")
+                    .withInitScript("test-init.sql");
+
+    static {
+        POSTGRES.start();
+    }
 
     // Wires the running container into Spring properties. The app reads these
     // env-var-style placeholders from application.yml without modification.
