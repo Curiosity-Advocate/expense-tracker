@@ -69,7 +69,13 @@ public class JwtService {
     }
 
     private Claims claims(String token) {
+        // Validate expiry against the injected Clock, not jjwt's default
+        // wall-clock. In production this is the system clock (behaviour
+        // unchanged); in tests it makes validation deterministic and keeps
+        // token generation and validation on one time source. jjwt's Clock is
+        // its own functional interface (Date now()), adapted from java.time here.
         return Jwts.parser()
+                .clock(() -> Date.from(Instant.now(clock)))
                 .verifyWith(signingKey())
                 .build()
                 .parseSignedClaims(token)

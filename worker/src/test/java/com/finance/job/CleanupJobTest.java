@@ -11,7 +11,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -43,8 +42,6 @@ class CleanupJobTest {
     void deleteExpiredRefreshTokens_usesClockInstant_asCutoff() {
         Instant fixed = Instant.parse("2026-05-25T02:20:00Z");
         when(clock.instant()).thenReturn(fixed);
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-
         job.deleteExpiredRefreshTokens();
 
         verify(jdbc).update(
@@ -56,8 +53,6 @@ class CleanupJobTest {
     void deleteExpiredIdempotencyKeys_usesClockInstant_asCutoff() {
         Instant fixed = Instant.parse("2026-05-25T02:05:00Z");
         when(clock.instant()).thenReturn(fixed);
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-
         job.deleteExpiredIdempotencyKeys();
 
         verify(jdbc).update(
@@ -69,8 +64,6 @@ class CleanupJobTest {
     @Test
     void deleteExpiredRefreshTokens_callsJdbcUpdateExactlyOnce() {
         when(clock.instant()).thenReturn(Instant.parse("2026-05-25T02:20:00Z"));
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-
         job.deleteExpiredRefreshTokens();
 
         verify(jdbc).update(anyString(), eq(Instant.parse("2026-05-25T02:20:00Z")));
@@ -82,8 +75,6 @@ class CleanupJobTest {
         Instant fixed = Instant.parse("2026-05-25T02:10:00Z");
         Instant expectedCutoff = fixed.minus(30, java.time.temporal.ChronoUnit.DAYS);
         when(clock.instant()).thenReturn(fixed);
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-
         job.deleteOldLoginFailures();
 
         verify(jdbc).update(
@@ -97,8 +88,6 @@ class CleanupJobTest {
     void cleanupJobExecutionState_deletesSuccessOlderThan1Day_andAlertedOlderThan7Days() {
         Instant fixed = Instant.parse("2026-06-01T02:15:00Z");
         when(clock.instant()).thenReturn(fixed);
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-
         job.cleanupJobExecutionState();
 
         verify(jdbc).update(

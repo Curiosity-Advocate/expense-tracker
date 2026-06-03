@@ -1,6 +1,8 @@
 package com.finance.controller;
 
+import com.finance.security.JwtService;
 import com.finance.service.ExpenseService;
+import com.finance.service.SudoTokenService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -30,6 +32,12 @@ class ExpenseControllerValidationTest {
     @Autowired MockMvc mvc;
 
     @MockBean ExpenseService expenseService;
+
+    // @WebMvcTest instantiates the app's @Component servlet Filters
+    // (JwtAuthenticationFilter, AsUserIdFilter); mock their collaborators so the
+    // context loads even though addFilters=false keeps them out of the chain.
+    @MockBean JwtService jwtService;
+    @MockBean SudoTokenService sudoTokenService;
 
     @Test
     void patch_negativeAmount_returns400_validationError() throws Exception {

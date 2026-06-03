@@ -1,9 +1,18 @@
 package com.finance.integration;
 
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
+
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 // Singleton Postgres container, shared by every integration test class in the JVM.
 //
@@ -54,5 +63,67 @@ public abstract class IntegrationTestBase {
         // JWT secret must be at least 32 characters — see JwtProperties.
         registry.add("JWT_SECRET",
                 () -> "test_jwt_secret_at_least_32_chars_long_xxx");
+    }
+
+    // ── RLS-aware raw-JDBC helpers ───────────────────────────────────────
+    //
+    // Raw JdbcTemplate calls on the app pool need an RLS context, but the old
+    // pattern — `appJdbc.execute("SET LOCAL app.current_user_id = ...")` followed
+    // by a separate `appJdbc.query(...)` — is broken: each call borrows its own
+    // pooled connection in autocommit, so SET LOCAL applies only to its own empty
+    // transaction and is discarded. Worse, it leaves the GUC defined-and-reset-to-''
+    // on that connection, so a later query's `current_setting('app.current_user_id')::uuid`
+    // fails with "invalid input syntax for type uuid: ''".
+    //
+    // These helpers run the SET LOCAL and the work in ONE transaction (hence one
+    // pinned connection), mirroring how RlsSessionAspect sets the variable inside
+    // each service method's @Transactional in production.
+
+    @Autowired
+    protected HikariDataSource appDataSource;
+
+    private TransactionTemplate appTx() {
+        return new TransactionTemplate(new DataSourceTransactionManager(appDataSource));
+    }
+
+    /** Runs {@code work} on the app pool with RLS context for {@code userId}, in one transaction. */
+    protected void withAppUser(UUID userId, Consumer<JdbcTemplate> work) {
+        withAppUser(userId, null, work);
+    }
+
+    /**
+     * Runs {@code work} with both the data-owner ({@code app.current_user_id}) and, when
+     * non-null, the acting user ({@code app.acting_user_id}) set — the D3 delegation shape
+     * the {@code set_audit_user} trigger reads.
+     */
+    protected void withAppUser(UUID currentUserId, UUID actingUserId, Consumer<JdbcTemplate> work) {
+        appTx().executeWithoutResult(status -> {
+            // JdbcTemplate(appDataSource) resolves the transaction-bound connection
+            // via DataSourceUtils, so SET LOCAL and the work share one connection.
+            JdbcTemplate jdbc = new JdbcTemplate(appDataSource);
+            jdbc.execute("SET LOCAL app.current_user_id = '" + currentUserId + "'");
+            if (actingUserId != null) {
+                jdbc.execute("SET LOCAL app.acting_user_id = '" + actingUserId + "'");
+            }
+            work.accept(jdbc);
+        });
+    }
+
+    /** Query variant of {@link #withAppUser(UUID, Consumer)} that returns a value. */
+    protected <T> T queryAsAppUser(UUID userId, Function<JdbcTemplate, T> work) {
+        return appTx().execute(status -> {
+            JdbcTemplate jdbc = new JdbcTemplate(appDataSource);
+            jdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            return work.apply(jdbc);
+        });
+    }
+
+    /**
+     * Runs maintenance SQL that does NOT need an RLS context (e.g. TRUNCATE, which
+     * is not subject to row-level security). No session variable is set, so the
+     * connection is not polluted with an empty GUC.
+     */
+    protected void appExec(String sql) {
+        new JdbcTemplate(appDataSource).execute(sql);
     }
 }

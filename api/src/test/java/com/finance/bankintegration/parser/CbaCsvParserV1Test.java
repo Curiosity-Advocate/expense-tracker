@@ -47,14 +47,20 @@ class CbaCsvParserV1Test {
 
     @Test
     void reportsParseFailureForInvalidDate() {
-        String csv = "not-a-date,-50,Bad row,100\n07/07/2025,-100,Good row,200\n";
+        // Row 1 is a header (skipped by the row-1 header-tolerance rule, which
+        // treats any unparseable row-1 date as a header). The invalid-date row
+        // is therefore placed at row 2 so it is parsed as data and reported as a
+        // failure rather than swallowed as a header.
+        String csv = "Date,Amount,Description,Balance\n"
+                + "not-a-date,-50,Bad row,100\n"
+                + "07/07/2025,-100,Good row,200\n";
         List<RowFailure> failures = new ArrayList<>();
         List<ParsedCsvRow> rows = parseString(csv, failures);
 
         assertThat(rows).hasSize(1).extracting(ParsedCsvRow::description).containsExactly("Good row");
         assertThat(failures).hasSize(1).first().satisfies(f -> {
             assertThat(f.message()).contains("Invalid date");
-            assertThat(f.rowNumber()).isEqualTo(1);
+            assertThat(f.rowNumber()).isEqualTo(2);
         });
     }
 

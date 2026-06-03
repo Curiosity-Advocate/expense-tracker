@@ -1,5 +1,6 @@
 package com.finance.bankintegration.config;
 
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
@@ -16,8 +17,13 @@ import java.util.concurrent.Executor;
 //
 // Named so thread dumps make it clear which work belongs to CSV import
 // vs other Spring async paths.
+// Also the in-package home for enabling BankIntegrationProperties: keeping the
+// @EnableConfigurationProperties here (rather than on ApiApplication) preserves
+// the "bankintegration is internally sealed" ArchUnit rule — nothing outside the
+// package needs to reference BankIntegrationProperties.
 @Configuration
 @EnableAsync
+@EnableConfigurationProperties(BankIntegrationProperties.class)
 public class AsyncExecutorConfig {
 
     public static final String CSV_IMPORT_EXECUTOR = "csvImportExecutor";
