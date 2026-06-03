@@ -20,7 +20,7 @@ Enforce data isolation at **three independent layers**:
 
 **Layer 2 — Aspect / Transaction.** `RlsSessionAspect` intercepts every method annotated `@Transactional`. Before the transaction body runs, the aspect issues `SET LOCAL app.current_user_id = '<uuid>'`. `SET LOCAL` scopes the variable to the current transaction only — this solves the HikariCP connection-reuse problem, where a connection returned to the pool would otherwise carry the previous user's session variable into the next caller's transaction. The aspect runs at `@Order(2)` so it fires after the Spring transaction has been opened.
 
-**Layer 3 — Database.** Every user-scoped table has a `RESTRICTIVE` RLS policy of the form `USING (user_id = current_setting('app.current_user_id')::uuid)`. PostgreSQL rewrites every query to add this filter. RESTRICTIVE mode means **if the session variable is not set, the policy returns zero rows** — fail-closed.
+**Layer 3 — Database.** Every user-scoped table has a `RESTRICTIVE` RLS policy of the form `USING (user_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid)`. PostgreSQL rewrites every query to add this filter. The `TRUE` (missing_ok) + `NULLIF(…, '')` make a **missing or empty** context resolve to `NULL`, so the predicate matches no rows — fail-closed. (V32 added this guard uniformly; before it, an unset GUC on the v2.0 tables and an empty-string GUC on any table — which a pooled connection retains after a prior `SET LOCAL` — raised an error instead of returning zero rows. Production never hit it because the aspect always sets the GUC first, but it broke the documented fail-closed contract, caught by `PoolIsolationIntegrationTest`.)
 
 ## Consequences
 

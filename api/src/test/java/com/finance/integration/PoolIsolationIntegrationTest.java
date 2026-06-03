@@ -52,13 +52,14 @@ class PoolIsolationIntegrationTest extends IntegrationTestBase {
     void setupPool_canInsertWithoutRlsContext() {
         JdbcTemplate setupJdbc = new JdbcTemplate(setupDataSource);
 
-        // No app.current_user_id is set on this connection. expense_setup has
-        // BYPASSRLS so the INSERT into users succeeds anyway — this is the
-        // capability the three pre-auth methods rely on.
+        // No app.current_user_id is set on this connection. The setup pool
+        // connects as the table-owner/superuser (Option-A pivot, ADR-0011) and
+        // bypasses RLS, so the INSERT into users succeeds anyway — the capability
+        // the three pre-auth methods rely on. (username must fit varchar(50).)
         UUID id = UUID.randomUUID();
         setupJdbc.update(
                 "INSERT INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)",
-                id, "isolation-test-" + id, id + "@test.com", "hashed");
+                id, "iso-" + id, id + "@test.com", "hashed");
 
         Integer count = setupJdbc.queryForObject(
                 "SELECT COUNT(*) FROM users WHERE id = ?", Integer.class, id);
@@ -70,14 +71,16 @@ class PoolIsolationIntegrationTest extends IntegrationTestBase {
         JdbcTemplate setupJdbc = new JdbcTemplate(setupDataSource);
         JdbcTemplate appJdbc   = new JdbcTemplate(appDataSource);
 
-        // Insert via the setup pool (BYPASSRLS).
+        // Insert via the setup pool (owner/superuser — bypasses RLS).
         UUID id = UUID.randomUUID();
         setupJdbc.update(
                 "INSERT INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)",
-                id, "rls-test-" + id, id + "@test.com", "hashed");
+                id, "rls-" + id, id + "@test.com", "hashed");
 
         // Read via the app pool with NO app.current_user_id set. RESTRICTIVE
-        // RLS policy returns zero rows when the session variable is missing.
+        // RLS policy returns zero rows when the session variable is missing or
+        // empty (V32 added the NULLIF empty-string guard so this fails closed
+        // rather than erroring on a pooled connection's stale '' GUC).
         Integer visible = appJdbc.queryForObject(
                 "SELECT COUNT(*) FROM users WHERE id = ?", Integer.class, id);
         assertThat(visible).isZero();
