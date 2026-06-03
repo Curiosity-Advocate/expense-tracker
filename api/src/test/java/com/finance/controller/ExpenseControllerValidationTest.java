@@ -23,6 +23,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // parameter activates Bean Validation; the @Positive constraint on the DTO field
 // is what actually rejects the value.
 @WebMvcTest(controllers = ExpenseController.class,
+        // ApiApplication's @EnableConfigurationProperties(JwtProperties.class) is
+        // processed by the slice, so JwtProperties (a @Validated record) must bind.
+        // Supply the app.jwt.* values it requires; the secret needs >= 32 chars.
+        properties = {
+                "app.jwt.secret=test_secret_at_least_32_characters_long_xxxx",
+                "app.jwt.access-token-expiry-minutes=15",
+                "app.jwt.refresh-token-expiry-days=7"
+        },
         excludeAutoConfiguration = {
                 org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration.class
         })

@@ -37,9 +37,6 @@ import java.util.UUID;
 @Service
 public class PostgresAuthService implements AuthService {
 
-    private static final int MAX_FAILED_ATTEMPTS    = 5;
-    private static final int FAILURE_WINDOW_MINUTES = 10;
-    private static final int LOCKOUT_MINUTES        = 15;
 
     // JDBC named-parameter keys.
     private static final String PARAM_USERNAME           = "username";
@@ -66,16 +63,6 @@ public class PostgresAuthService implements AuthService {
     private static final String SQL_CLEAR_LOCKED_UNTIL =
             "UPDATE users SET locked_until = NULL WHERE id = :id";
 
-    private static final String SQL_SET_LOCKED_UNTIL =
-            "UPDATE users SET locked_until = :lockedUntil WHERE id = :id";
-
-    private static final String SQL_INSERT_LOGIN_FAILURE =
-            "INSERT INTO user_login_failures (user_id, attempted_at) VALUES (:userId, :attemptedAt)";
-
-    private static final String SQL_COUNT_RECENT_FAILURES =
-            "SELECT COUNT(*) FROM user_login_failures " +
-            "WHERE user_id = :userId AND attempted_at > :windowStart";
-
     private static final String SQL_INSERT_REFRESH_TOKEN =
             "INSERT INTO refresh_tokens " +
             "(token_hash, user_id, session_started_at, expires_at, rotated_from) " +
@@ -100,6 +87,7 @@ public class PostgresAuthService implements AuthService {
     private final NamedParameterJdbcTemplate setupJdbcTemplate;
     private final SecureTokenGenerator      tokenGenerator;
     private final RefreshTokenChainRevoker   chainRevoker;
+    private final LoginFailureRecorder       loginFailureRecorder;
     private final BCryptPasswordEncoder      passwordEncoder;
     private final JwtService                 jwtService;
     private final JwtProperties              jwtProperties;
@@ -114,6 +102,7 @@ public class PostgresAuthService implements AuthService {
     public PostgresAuthService(NamedParameterJdbcTemplate setupJdbcTemplate,
                                SecureTokenGenerator tokenGenerator,
                                RefreshTokenChainRevoker chainRevoker,
+                               LoginFailureRecorder loginFailureRecorder,
                                BCryptPasswordEncoder passwordEncoder,
                                JwtService jwtService,
                                JwtProperties jwtProperties,
@@ -121,6 +110,7 @@ public class PostgresAuthService implements AuthService {
         this.setupJdbcTemplate     = setupJdbcTemplate;
         this.tokenGenerator = tokenGenerator;
         this.chainRevoker          = chainRevoker;
+        this.loginFailureRecorder  = loginFailureRecorder;
         this.passwordEncoder       = passwordEncoder;
         this.jwtService            = jwtService;
         this.jwtProperties         = jwtProperties;
@@ -191,7 +181,9 @@ public class PostgresAuthService implements AuthService {
         }
 
         if (!passwordEncoder.matches(command.password(), user.passwordHash)) {
-            recordFailedAttempt(user.id, now);
+            // REQUIRES_NEW bean: commits the failure + lockout independently of
+            // this transaction's rollback on the throw below. See LoginFailureRecorder.
+            loginFailureRecorder.recordFailedAttempt(user.id, now);
             throw new InvalidCredentialsException();
         }
 
@@ -320,35 +312,6 @@ public class PostgresAuthService implements AuthService {
                         .addValue(PARAM_ROTATED_FROM,       null));
 
         return new TokenPair(accessJwt, accessExpiry, refresh.rawToken(), refreshExpiry, "Bearer");
-    }
-
-    // Sliding-window lockout: record the attempt, then count how many failures
-    // this user has had in the last FAILURE_WINDOW_MINUTES. Lock if at threshold.
-    // Failure rows are kept (not deleted on success) so they age out by time,
-    // protecting against the "type wrong, log in once, type wrong forever"
-    // bypass that a counter-reset model would allow.
-    private void recordFailedAttempt(UUID userId, Instant now) {
-        setupJdbcTemplate.update(
-                SQL_INSERT_LOGIN_FAILURE,
-                new MapSqlParameterSource()
-                        .addValue(PARAM_USER_ID, userId)
-                        .addValue("attemptedAt", Timestamp.from(now)));
-
-        Instant windowStart = now.minus(FAILURE_WINDOW_MINUTES, ChronoUnit.MINUTES);
-        Long recentFailures = setupJdbcTemplate.queryForObject(
-                SQL_COUNT_RECENT_FAILURES,
-                new MapSqlParameterSource()
-                        .addValue(PARAM_USER_ID, userId)
-                        .addValue("windowStart", Timestamp.from(windowStart)),
-                Long.class);
-
-        if (recentFailures != null && recentFailures >= MAX_FAILED_ATTEMPTS) {
-            setupJdbcTemplate.update(
-                    SQL_SET_LOCKED_UNTIL,
-                    new MapSqlParameterSource()
-                            .addValue(PARAM_ID,      userId)
-                            .addValue("lockedUntil", Timestamp.from(now.plus(LOCKOUT_MINUTES, ChronoUnit.MINUTES))));
-        }
     }
 
     private static Instant toInstant(Timestamp ts) {
