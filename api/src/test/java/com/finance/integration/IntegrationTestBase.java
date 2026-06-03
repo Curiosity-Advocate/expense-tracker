@@ -2,6 +2,7 @@ package com.finance.integration;
 
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -81,6 +82,19 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected HikariDataSource appDataSource;
+
+    @Autowired
+    @Qualifier("setupDataSource")
+    protected HikariDataSource setupDataSource;
+
+    // JdbcTemplate on the SETUP pool, which connects as the table-owner/superuser
+    // and bypasses RLS. Use it for test setup and for verifying persisted state
+    // ("did the service write row X?") without juggling app.current_user_id. It
+    // does NOT prove RLS visibility — use withAppUser/queryAsAppUser when a test
+    // must operate under a specific user's RLS/audit context.
+    protected JdbcTemplate setupJdbc() {
+        return new JdbcTemplate(setupDataSource);
+    }
 
     private TransactionTemplate appTx() {
         return new TransactionTemplate(new DataSourceTransactionManager(appDataSource));

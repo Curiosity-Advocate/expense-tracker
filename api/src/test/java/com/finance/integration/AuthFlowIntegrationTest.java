@@ -27,9 +27,9 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
 
     @BeforeEach
     void wipeUserState() {
-        // TRUNCATE is not subject to RLS, so no app.current_user_id is needed
-        // (and setting it would pollute the pooled connection — see IntegrationTestBase).
-        appExec("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
+        // Inspect/seed via the setup pool (bypasses RLS) — these checks verify
+        // that the service persisted state, not RLS visibility.
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
     }
 
     @Test
@@ -38,13 +38,13 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
                 new RegisterCommand("alice", "alice@example.com", "password123"));
         userSetupService.setupNewUser(created.userId());
 
-        Integer userCount = queryAsAppUser(created.userId(), jdbc -> jdbc.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE id = ?", Integer.class, created.userId()));
+        Integer userCount = setupJdbc().queryForObject(
+                "SELECT COUNT(*) FROM users WHERE id = ?", Integer.class, created.userId());
         assertThat(userCount).isEqualTo(1);
 
-        var accountNames = queryAsAppUser(created.userId(), jdbc -> jdbc.queryForList(
+        var accountNames = setupJdbc().queryForList(
                 "SELECT name FROM bank_accounts WHERE user_id = ? ORDER BY name",
-                String.class, created.userId()));
+                String.class, created.userId());
         assertThat(accountNames).containsExactly("Cash", "Crypto");
     }
 
@@ -80,10 +80,10 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
         assertThat(pair.tokenType()).isEqualTo("Bearer");
 
         // Refresh token row landed with rotated_from = NULL (start of chain).
-        Integer rowCount = queryAsAppUser(dave.userId(), jdbc -> jdbc.queryForObject(
+        Integer rowCount = setupJdbc().queryForObject(
                 "SELECT COUNT(*) FROM refresh_tokens " +
                 "WHERE user_id = ? AND rotated_from IS NULL AND revoked_at IS NULL",
-                Integer.class, dave.userId()));
+                Integer.class, dave.userId());
         assertThat(rowCount).isEqualTo(1);
     }
 
@@ -95,9 +95,9 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
         assertThatThrownBy(() -> authService.login(new LoginCommand("eve", "wrong")))
                 .isInstanceOf(InvalidCredentialsException.class);
 
-        Integer failureCount = queryAsAppUser(user.userId(), jdbc -> jdbc.queryForObject(
+        Integer failureCount = setupJdbc().queryForObject(
                 "SELECT COUNT(*) FROM user_login_failures WHERE user_id = ?",
-                Integer.class, user.userId()));
+                Integer.class, user.userId());
         assertThat(failureCount).isEqualTo(1);
     }
 
@@ -111,10 +111,10 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
                     .isInstanceOf(InvalidCredentialsException.class);
         }
 
-        Instant lockedUntil = queryAsAppUser(user.userId(), jdbc -> jdbc.queryForObject(
+        Instant lockedUntil = setupJdbc().queryForObject(
                 "SELECT locked_until FROM users WHERE id = ?",
                 (rs, n) -> rs.getTimestamp("locked_until").toInstant(),
-                user.userId()));
+                user.userId());
         assertThat(lockedUntil).isAfter(Instant.now());
 
         // Sixth attempt is rejected because the account is locked, regardless
@@ -133,13 +133,13 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
                     .isInstanceOf(InvalidCredentialsException.class);
         }
 
-        Instant lockedUntil = queryAsAppUser(user.userId(), jdbc -> jdbc.queryForObject(
+        Instant lockedUntil = setupJdbc().queryForObject(
                 "SELECT locked_until FROM users WHERE id = ?",
                 (rs, n) -> {
                     var ts = rs.getTimestamp("locked_until");
                     return ts == null ? null : ts.toInstant();
                 },
-                user.userId()));
+                user.userId());
         assertThat(lockedUntil).isNull();
     }
 
@@ -148,22 +148,22 @@ class AuthFlowIntegrationTest extends IntegrationTestBase {
         RegisteredUser user = authService.register(
                 new RegisterCommand("hank", "hank@example.com", "correct"));
 
-        // Backdate the lockout to a minute ago. expense_app has UPDATE on users.
-        withAppUser(user.userId(), jdbc -> jdbc.update(
+        // Backdate the lockout to a minute ago (setup pool bypasses RLS).
+        setupJdbc().update(
                 "UPDATE users SET locked_until = ? WHERE id = ?",
                 java.sql.Timestamp.from(Instant.now().minus(1, ChronoUnit.MINUTES)),
-                user.userId()));
+                user.userId());
 
         TokenPair pair = authService.login(new LoginCommand("hank", "correct"));
         assertThat(pair.accessToken()).isNotBlank();
 
-        Instant lockedUntilAfter = queryAsAppUser(user.userId(), jdbc -> jdbc.queryForObject(
+        Instant lockedUntilAfter = setupJdbc().queryForObject(
                 "SELECT locked_until FROM users WHERE id = ?",
                 (rs, n) -> {
                     var ts = rs.getTimestamp("locked_until");
                     return ts == null ? null : ts.toInstant();
                 },
-                user.userId()));
+                user.userId());
         assertThat(lockedUntilAfter).isNull();
     }
 
