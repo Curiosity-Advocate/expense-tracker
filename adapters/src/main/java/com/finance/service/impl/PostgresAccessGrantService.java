@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -64,18 +65,21 @@ public class PostgresAccessGrantService implements AccessGrantService {
                     + " and " + MAX_EXPIRES_IN_DAYS);
         }
 
-        UserEntity grantee = userRepository
-                .findByUsernameAndIsDiscoverableTrue(command.granteeUsername())
+        // Grantee discovery crosses the RLS boundary (the grantee is not the
+        // caller), so it goes through the SECURITY DEFINER find_discoverable_user
+        // function (V33) which bypasses RLS and returns only the id.
+        UUID granteeId = userRepository
+                .findDiscoverableUserId(command.granteeUsername())
                 .orElseThrow(GranteeNotDiscoverableException::new);
 
-        if (command.grantorId().equals(grantee.getId())) {
+        if (command.grantorId().equals(granteeId)) {
             throw new SelfGrantNotAllowedException();
         }
 
         Instant now = Instant.now(clock);
         AccessGrantEntity entity = new AccessGrantEntity();
         entity.setGrantorId(command.grantorId());
-        entity.setGranteeId(grantee.getId());
+        entity.setGranteeId(granteeId);
         entity.setAccessLevel(command.accessLevel());
         entity.setExpiresAt(now.plus(command.expiresInDays(), ChronoUnit.DAYS));
 
@@ -90,7 +94,9 @@ public class PostgresAccessGrantService implements AccessGrantService {
                         "grantorId does not resolve to a user — should be impossible "
                                 + "given the authenticated UserPrincipal originated it"));
 
-        return toDomain(saved, grantorUsername, grantee.getUsername());
+        // granteeUsername comes straight from the command (we just resolved the
+        // id from it), so no second cross-RLS lookup is needed here.
+        return toDomain(saved, grantorUsername, command.granteeUsername());
     }
 
     @Override
@@ -106,8 +112,13 @@ public class PostgresAccessGrantService implements AccessGrantService {
         Set<UUID> referencedUserIds = grants.stream()
                 .flatMap(g -> Stream.of(g.getGrantorId(), g.getGranteeId()))
                 .collect(Collectors.toSet());
-        Map<UUID, String> usernames = userRepository.findAllById(referencedUserIds).stream()
-                .collect(Collectors.toMap(UserEntity::getId, UserEntity::getUsername));
+        // The counterparty on each grant is, by definition, not the caller, so
+        // their row is hidden by the users RLS policy. Resolve usernames via the
+        // SECURITY DEFINER username_of function (V33) instead of a direct read.
+        Map<UUID, String> usernames = referencedUserIds.stream()
+                .collect(HashMap::new,
+                        (m, id) -> m.put(id, userRepository.resolveUsername(id).orElse(null)),
+                        HashMap::putAll);
 
         return grants.stream()
                 .map(g -> toDomain(g,

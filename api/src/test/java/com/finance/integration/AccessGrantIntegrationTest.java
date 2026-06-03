@@ -7,20 +7,20 @@ import com.finance.domain.RegisteredUser;
 import com.finance.exception.GrantNotFoundException;
 import com.finance.exception.GranteeNotDiscoverableException;
 import com.finance.exception.SelfGrantNotAllowedException;
+import com.finance.domain.UserPrincipal;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
-import com.zaxxer.hikari.HikariDataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,19 +31,16 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
 
     @Autowired AuthService authService;
     @Autowired AccessGrantService accessGrantService;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-    @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
-
-    private JdbcTemplate appJdbc;
-    private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appTx   = new TransactionTemplate(appTxManager);
-        // TRUNCATE via the setup pool (bypasses RLS, not subject to it anyway);
-        // avoids leaving app.current_user_id = '' on a pooled app connection.
+        // TRUNCATE via the setup pool (bypasses RLS, not subject to it anyway).
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, access_grants, users RESTART IDENTITY CASCADE");
+    }
+
+    @AfterEach
+    void clearAuth() {
+        SecurityContextHolder.clearContext();
     }
 
     // Helpers — register a user, optionally mark as discoverable. is_discoverable
@@ -60,11 +57,20 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         return id;
     }
 
+    // Run a service call as the given user. Instead of opening an outer
+    // transaction and SET LOCAL-ing (which broke when the inner @Transactional
+    // service threw — the outer tx became rollback-only → UnexpectedRollbackException),
+    // this populates the SecurityContext so the service's own @Transactional +
+    // RlsSessionAspect set app.current_user_id — exactly like a real HTTP request.
     private void runAs(UUID userId, Runnable body) {
-        appTx.executeWithoutResult(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
-            body.run();
-        });
+        authenticateAs(userId);
+        body.run();
+    }
+
+    private void authenticateAs(UUID userId) {
+        UserPrincipal principal = UserPrincipal.of(userId, "user-" + userId);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, List.of()));
     }
 
     // ── create ───────────────────────────────────────────────────────────────
@@ -257,11 +263,10 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
                         .isInstanceOf(GrantNotFoundException.class));
     }
 
-    // Helper for capturing a value from a transaction-scoped runAs.
-    private <T> T runAsReturning(UUID userId, java.util.function.Supplier<T> body) {
-        return appTx.execute(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
-            return body.get();
-        });
+    // Value-returning variant of runAs (see runAs for why this uses the
+    // SecurityContext rather than an outer transaction).
+    private <T> T runAsReturning(UUID userId, Supplier<T> body) {
+        authenticateAs(userId);
+        return body.get();
     }
 }

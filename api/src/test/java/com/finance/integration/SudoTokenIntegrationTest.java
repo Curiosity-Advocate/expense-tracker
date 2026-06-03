@@ -6,6 +6,7 @@ import com.finance.command.RegisterCommand;
 import com.finance.domain.AccessGrant;
 import com.finance.domain.SudoToken;
 import com.finance.domain.SudoTokenVerification;
+import com.finance.domain.UserPrincipal;
 import com.finance.exception.GrantNotUsableException;
 import com.finance.exception.InvalidCredentialsException;
 import com.finance.exception.InvalidSudoTokenException;
@@ -13,14 +14,12 @@ import com.finance.security.SecureTokenGenerator;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
 import com.finance.service.SudoTokenService;
-import com.zaxxer.hikari.HikariDataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -35,24 +34,21 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
 
     private static final String READ_WRITE = "READ_WRITE";
     private static final String CORRECT_PW = "pw_correct";
-    private static final String SET_USER_PREFIX = "SET LOCAL app.current_user_id = '";
 
     @Autowired AuthService authService;
     @Autowired AccessGrantService accessGrantService;
     @Autowired SudoTokenService sudoTokenService;
     @Autowired SecureTokenGenerator tokenGenerator;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-    @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
-
-    private JdbcTemplate appJdbc;
-    private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appTx   = new TransactionTemplate(appTxManager);
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
+    }
+
+    @AfterEach
+    void clearAuth() {
+        SecurityContextHolder.clearContext();
     }
 
     private UUID register(String username) {
@@ -66,18 +62,24 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         return id;
     }
 
+    // Run a service call as the given user via the SecurityContext, so the
+    // service's own @Transactional + RlsSessionAspect set app.current_user_id —
+    // same as a real HTTP request, and a thrown service exception rolls back the
+    // service's own tx cleanly (no outer-tx rollback-only surprise).
     private void runAs(UUID userId, Runnable body) {
-        appTx.executeWithoutResult(status -> {
-            appJdbc.execute(SET_USER_PREFIX + userId + "'");
-            body.run();
-        });
+        authenticateAs(userId);
+        body.run();
     }
 
     private <T> T runAsReturning(UUID userId, Supplier<T> body) {
-        return appTx.execute(status -> {
-            appJdbc.execute(SET_USER_PREFIX + userId + "'");
-            return body.get();
-        });
+        authenticateAs(userId);
+        return body.get();
+    }
+
+    private void authenticateAs(UUID userId) {
+        UserPrincipal principal = UserPrincipal.of(userId, "user-" + userId);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, java.util.List.of()));
     }
 
     // Helper: create a grant where grantor delegates to grantee, return grant id.
@@ -165,12 +167,11 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         UUID grantee = registerDiscoverable("liam");
         UUID grantId = createGrant(grantor, "liam");
 
-        // Backdate the grant's expiry directly. lock_created_at and the audit
-        // triggers don't block expires_at updates.
+        // Backdate the grant's expiry directly via the setup pool (bypasses RLS).
+        // lock_created_at and the audit triggers don't block expires_at updates.
         Instant longAgo = Instant.now().minus(8, ChronoUnit.DAYS);
-        runAs(grantor, () ->
-                appJdbc.update("UPDATE access_grants SET expires_at = ? WHERE id = ?",
-                        Timestamp.from(longAgo), grantId));
+        setupJdbc().update("UPDATE access_grants SET expires_at = ? WHERE id = ?",
+                Timestamp.from(longAgo), grantId);
 
         runAs(grantee, () ->
                 assertThatThrownBy(() -> sudoTokenService.create(
@@ -238,11 +239,11 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
                 "SELECT id FROM access_grants WHERE grantor_id = ?", UUID.class, grantor);
         Instant longAgo = Instant.now().minus(1, ChronoUnit.HOURS);
 
-        runAs(grantee, () ->
-                appJdbc.update(
-                        "INSERT INTO sudo_tokens (token_hash, grant_id, grantee_id, expires_at) "
-                                + "VALUES (?, ?, ?, ?)",
-                        raw.hash(), grantId, grantee, Timestamp.from(longAgo)));
+        // Seed the backdated token via the setup pool (bypasses RLS).
+        setupJdbc().update(
+                "INSERT INTO sudo_tokens (token_hash, grant_id, grantee_id, expires_at) "
+                        + "VALUES (?, ?, ?, ?)",
+                raw.hash(), grantId, grantee, Timestamp.from(longAgo));
 
         runAs(grantee, () ->
                 assertThatThrownBy(() -> sudoTokenService.verify(raw.rawToken(), grantee))
