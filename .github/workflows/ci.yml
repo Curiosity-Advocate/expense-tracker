@@ -35,8 +35,8 @@ jobs:
       - name: Build (skip tests for speed)
         run: ./gradlew :api:bootJar :worker:bootJar --no-daemon -x test
 
-      - name: Run unit tests
-        run: ./gradlew test --no-daemon
+      - name: Run tests (unit + Testcontainers integration)
+        run: ./gradlew test --no-daemon --continue
 
       - name: Build API Docker image
         run: docker build -t expense-tracker-api:${{ github.sha }} .

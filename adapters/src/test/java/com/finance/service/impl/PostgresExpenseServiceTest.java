@@ -200,8 +200,10 @@ class PostgresExpenseServiceTest {
             LocalDate expenseDate = LocalDate.of(2026, 1, 11);
             Instant fixedInstant = Instant.parse("2026-01-11T10:00:00Z");
 
+            // softDeleteExpense reads Instant.now(clock) (clock.instant()) only;
+            // it never calls clock.getZone(), so stubbing getZone() trips
+            // Mockito strict-stubbing with UnnecessaryStubbingException.
             when(clock.instant()).thenReturn(fixedInstant);
-            when(clock.getZone()).thenReturn(ZoneOffset.UTC);
 
             ExpenseEntity expense = new ExpenseEntity();
             expense.setSource(ExpenseSource.MANUAL.name());
