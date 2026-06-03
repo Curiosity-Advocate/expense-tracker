@@ -2,6 +2,7 @@ package com.finance.config;
 
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.context.annotation.Bean;
@@ -11,8 +12,6 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
-
-import javax.sql.DataSource;
 
 // Two connection pools — see ADR-0011.
 //
@@ -31,6 +30,17 @@ import javax.sql.DataSource;
 // NOT bind it to JPA — keeping it on plain JdbcTemplate means the only SQL
 // that ever runs through this pool is the SQL these three methods write
 // explicitly. No surprise lazy loads, no entity-graph traversals.
+//
+// IMPORTANT — the @Qualifier("setupDataSource") on the setup-pool consumers
+// below is load-bearing, do not remove it. There are two HikariDataSource
+// beans and appDataSource is @Primary. This class lives in the `adapters`
+// module, which does NOT apply the Spring Boot Gradle plugin, so it compiles
+// WITHOUT `-parameters`. With parameter names stripped, Spring cannot match a
+// @Bean method parameter to a bean by name and falls back to by-type — which
+// resolves to the @Primary appDataSource. Without the qualifier, the setup
+// transaction manager and setup JdbcTemplate both silently bind to the APP
+// pool (expense_app, RLS-enforced), so register/login fail with an RLS policy
+// violation surfaced as "bad SQL grammar". The qualifier pins them explicitly.
 @Configuration
 public class DataSourceConfig {
 
@@ -46,7 +56,7 @@ public class DataSourceConfig {
         return DataSourceBuilder.create().type(HikariDataSource.class).build();
     }
 
-    @Bean
+    @Bean("setupDataSource")
     @ConfigurationProperties("spring.datasource.setup")
     public HikariDataSource setupDataSource() {
         return DataSourceBuilder.create().type(HikariDataSource.class).build();
@@ -65,7 +75,8 @@ public class DataSourceConfig {
     // @Transactional("setupTransactionManager"). Any drift between this name
     // and the annotation strings in services is caught by the test in step 6.
     @Bean(name = SETUP_TX_MANAGER)
-    public PlatformTransactionManager setupTransactionManager(HikariDataSource setupDataSource) {
+    public PlatformTransactionManager setupTransactionManager(
+            @Qualifier("setupDataSource") HikariDataSource setupDataSource) {
         return new DataSourceTransactionManager(setupDataSource);
     }
 
@@ -74,7 +85,8 @@ public class DataSourceConfig {
     // NamedParameterJdbcTemplate gives :name placeholders, which are safer
     // against positional-argument bugs than the basic JdbcTemplate.
     @Bean
-    public NamedParameterJdbcTemplate setupJdbcTemplate(HikariDataSource setupDataSource) {
+    public NamedParameterJdbcTemplate setupJdbcTemplate(
+            @Qualifier("setupDataSource") HikariDataSource setupDataSource) {
         return new NamedParameterJdbcTemplate(setupDataSource);
     }
 }
