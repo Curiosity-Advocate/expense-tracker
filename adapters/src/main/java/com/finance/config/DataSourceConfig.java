@@ -63,9 +63,21 @@ public class DataSourceConfig {
     }
 
     // App-side transaction manager — JPA-backed, wraps the auto-configured
-    // EntityManagerFactory. @Primary so every existing @Transactional resolves
-    // here by default; no service code needs to change.
-    @Bean
+    // EntityManagerFactory. @Primary so every unqualified @Transactional resolves
+    // here by default.
+    //
+    // The PRIMARY bean name MUST be "transactionManager": Spring Data JPA's
+    // repository infrastructure (@EnableJpaRepositories) defaults its
+    // transactionManagerRef to the literal name "transactionManager", and that
+    // lookup is by-name, NOT @Primary-aware. Name it anything else and every
+    // repository write (expenseRepository.save(), etc.) fails at runtime with
+    // "No matching TransactionManager bean found for qualifier 'transactionManager'".
+    // Read paths that use the EntityManager directly don't hit this, which is
+    // why it only surfaces on the first repository-backed write.
+    //
+    // "appTransactionManager" is kept as a second name because
+    // AsyncBatchedCsvImportProcessor references it via @Qualifier.
+    @Bean(name = {"transactionManager", "appTransactionManager"})
     @Primary
     public PlatformTransactionManager appTransactionManager(EntityManagerFactory emf) {
         return new JpaTransactionManager(emf);
