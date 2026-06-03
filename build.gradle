@@ -20,4 +20,16 @@ subprojects {
             languageVersion = JavaLanguageVersion.of(21)
         }
     }
+
+    // All tests are JUnit 5 (Jupiter). Without this, Gradle's Test task defaults
+    // to the JUnit 4 runner and silently discovers ZERO Jupiter tests — every
+    // test class is skipped and `gradle test` passes in <1s having run nothing.
+    // That is what let a string of context-load/wiring bugs reach production.
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            exceptionFormat 'full'
+        }
+    }
 }
