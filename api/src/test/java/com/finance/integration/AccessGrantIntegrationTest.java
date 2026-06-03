@@ -7,15 +7,16 @@ import com.finance.domain.RegisteredUser;
 import com.finance.exception.GrantNotFoundException;
 import com.finance.exception.GranteeNotDiscoverableException;
 import com.finance.exception.SelfGrantNotAllowedException;
-import com.finance.domain.UserPrincipal;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
-import org.junit.jupiter.api.AfterEach;
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,16 +32,18 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
 
     @Autowired AuthService authService;
     @Autowired AccessGrantService accessGrantService;
+    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
+    @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
+
+    private JdbcTemplate appJdbc;
+    private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
+        appJdbc = new JdbcTemplate(appDataSource);
+        appTx   = new TransactionTemplate(appTxManager);
         // TRUNCATE via the setup pool (bypasses RLS, not subject to it anyway).
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, access_grants, users RESTART IDENTITY CASCADE");
-    }
-
-    @AfterEach
-    void clearAuth() {
-        SecurityContextHolder.clearContext();
     }
 
     // Helpers — register a user, optionally mark as discoverable. is_discoverable
@@ -57,20 +60,20 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         return id;
     }
 
-    // Run a service call as the given user. Instead of opening an outer
-    // transaction and SET LOCAL-ing (which broke when the inner @Transactional
-    // service threw — the outer tx became rollback-only → UnexpectedRollbackException),
-    // this populates the SecurityContext so the service's own @Transactional +
-    // RlsSessionAspect set app.current_user_id — exactly like a real HTTP request.
+    // Run a service call as the given user: SET LOCAL app.current_user_id within
+    // an outer transaction so it shares the connection the service's @Transactional
+    // joins (the RlsSessionAspect skips, since there's no SecurityContext, leaving
+    // our value in place). Same pattern as AuditTrailIntegrationTest.
+    //
+    // For tests that expect the service to throw, put assertThatThrownBy OUTSIDE
+    // runAs: the exception propagates out of the callback and TransactionTemplate
+    // rolls back and re-throws IT (not UnexpectedRollbackException, which only
+    // happens when the callback returns normally on a rollback-only tx).
     private void runAs(UUID userId, Runnable body) {
-        authenticateAs(userId);
-        body.run();
-    }
-
-    private void authenticateAs(UUID userId) {
-        UserPrincipal principal = UserPrincipal.of(userId, "user-" + userId);
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, List.of()));
+        appTx.executeWithoutResult(status -> {
+            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            body.run();
+        });
     }
 
     // ── create ───────────────────────────────────────────────────────────────
@@ -98,10 +101,9 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
     void create_selfGrant_throws() {
         UUID userId = registerDiscoverable("carol");
 
-        runAs(userId, () ->
-                assertThatThrownBy(() -> accessGrantService.create(
-                        new CreateAccessGrantCommand(userId, "carol", READ_WRITE, 7)))
-                        .isInstanceOf(SelfGrantNotAllowedException.class));
+        assertThatThrownBy(() -> runAs(userId, () -> accessGrantService.create(
+                new CreateAccessGrantCommand(userId, "carol", READ_WRITE, 7))))
+                .isInstanceOf(SelfGrantNotAllowedException.class);
     }
 
     @Test
@@ -109,20 +111,18 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantor = register("dave");
         register("eve");  // exists but is_discoverable = FALSE (default)
 
-        runAs(grantor, () ->
-                assertThatThrownBy(() -> accessGrantService.create(
-                        new CreateAccessGrantCommand(grantor, "eve", READ_WRITE, 7)))
-                        .isInstanceOf(GranteeNotDiscoverableException.class));
+        assertThatThrownBy(() -> runAs(grantor, () -> accessGrantService.create(
+                new CreateAccessGrantCommand(grantor, "eve", READ_WRITE, 7))))
+                .isInstanceOf(GranteeNotDiscoverableException.class);
     }
 
     @Test
     void create_granteeDoesNotExist_throwsSameAsNotDiscoverable() {
         UUID grantor = register("frank");
 
-        runAs(grantor, () ->
-                assertThatThrownBy(() -> accessGrantService.create(
-                        new CreateAccessGrantCommand(grantor, "no-such-user", READ_WRITE, 7)))
-                        .isInstanceOf(GranteeNotDiscoverableException.class));
+        assertThatThrownBy(() -> runAs(grantor, () -> accessGrantService.create(
+                new CreateAccessGrantCommand(grantor, "no-such-user", READ_WRITE, 7))))
+                .isInstanceOf(GranteeNotDiscoverableException.class);
     }
 
     @Test
@@ -130,10 +130,9 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantor = register("grace");
         registerDiscoverable("hal");
 
-        runAs(grantor, () ->
-                assertThatThrownBy(() -> accessGrantService.create(
-                        new CreateAccessGrantCommand(grantor, "hal", READ_WRITE, 0)))
-                        .isInstanceOf(IllegalArgumentException.class));
+        assertThatThrownBy(() -> runAs(grantor, () -> accessGrantService.create(
+                new CreateAccessGrantCommand(grantor, "hal", READ_WRITE, 0))))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -141,10 +140,9 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantor = register("ian");
         registerDiscoverable("jan");
 
-        runAs(grantor, () ->
-                assertThatThrownBy(() -> accessGrantService.create(
-                        new CreateAccessGrantCommand(grantor, "jan", READ_WRITE, 31)))
-                        .isInstanceOf(IllegalArgumentException.class));
+        assertThatThrownBy(() -> runAs(grantor, () -> accessGrantService.create(
+                new CreateAccessGrantCommand(grantor, "jan", READ_WRITE, 31))))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     // ── list — RLS dual-clause ───────────────────────────────────────────────
@@ -234,9 +232,8 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
                 accessGrantService.create(
                         new CreateAccessGrantCommand(grantor, "uma", READ_WRITE, 7)).id());
 
-        runAs(outside, () ->
-                assertThatThrownBy(() -> accessGrantService.revoke(grantId, outside))
-                        .isInstanceOf(GrantNotFoundException.class));
+        assertThatThrownBy(() -> runAs(outside, () -> accessGrantService.revoke(grantId, outside)))
+                .isInstanceOf(GrantNotFoundException.class);
     }
 
     @Test
@@ -257,16 +254,15 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
     void revoke_unknownGrantId_throwsGrantNotFound() {
         UUID userId = register("yvonne");
 
-        runAs(userId, () ->
-                assertThatThrownBy(() ->
-                        accessGrantService.revoke(UUID.randomUUID(), userId))
-                        .isInstanceOf(GrantNotFoundException.class));
+        assertThatThrownBy(() -> runAs(userId, () -> accessGrantService.revoke(UUID.randomUUID(), userId)))
+                .isInstanceOf(GrantNotFoundException.class);
     }
 
-    // Value-returning variant of runAs (see runAs for why this uses the
-    // SecurityContext rather than an outer transaction).
+    // Value-returning variant of runAs (same SET LOCAL-in-transaction approach).
     private <T> T runAsReturning(UUID userId, Supplier<T> body) {
-        authenticateAs(userId);
-        return body.get();
+        return appTx.execute(status -> {
+            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            return body.get();
+        });
     }
 }

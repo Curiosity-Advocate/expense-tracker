@@ -6,7 +6,6 @@ import com.finance.command.RegisterCommand;
 import com.finance.domain.AccessGrant;
 import com.finance.domain.SudoToken;
 import com.finance.domain.SudoTokenVerification;
-import com.finance.domain.UserPrincipal;
 import com.finance.exception.GrantNotUsableException;
 import com.finance.exception.InvalidCredentialsException;
 import com.finance.exception.InvalidSudoTokenException;
@@ -14,12 +13,14 @@ import com.finance.security.SecureTokenGenerator;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
 import com.finance.service.SudoTokenService;
-import org.junit.jupiter.api.AfterEach;
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -39,16 +40,18 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     @Autowired AccessGrantService accessGrantService;
     @Autowired SudoTokenService sudoTokenService;
     @Autowired SecureTokenGenerator tokenGenerator;
+    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
+    @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
+
+    private JdbcTemplate appJdbc;
+    private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
+        appJdbc = new JdbcTemplate(appDataSource);
+        appTx   = new TransactionTemplate(appTxManager);
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
-    }
-
-    @AfterEach
-    void clearAuth() {
-        SecurityContextHolder.clearContext();
     }
 
     private UUID register(String username) {
@@ -62,24 +65,24 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         return id;
     }
 
-    // Run a service call as the given user via the SecurityContext, so the
-    // service's own @Transactional + RlsSessionAspect set app.current_user_id —
-    // same as a real HTTP request, and a thrown service exception rolls back the
-    // service's own tx cleanly (no outer-tx rollback-only surprise).
+    // Run a service call as the given user: SET LOCAL app.current_user_id within an
+    // outer transaction the service's @Transactional joins (RlsSessionAspect skips
+    // — no SecurityContext — so our value stands). Same pattern as AuditTrail.
+    // For tests expecting a throw, put assertThatThrownBy OUTSIDE runAs so the
+    // exception propagates (TransactionTemplate re-throws it rather than wrapping
+    // it as UnexpectedRollbackException).
     private void runAs(UUID userId, Runnable body) {
-        authenticateAs(userId);
-        body.run();
+        appTx.executeWithoutResult(status -> {
+            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            body.run();
+        });
     }
 
     private <T> T runAsReturning(UUID userId, Supplier<T> body) {
-        authenticateAs(userId);
-        return body.get();
-    }
-
-    private void authenticateAs(UUID userId) {
-        UserPrincipal principal = UserPrincipal.of(userId, "user-" + userId);
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, java.util.List.of()));
+        return appTx.execute(status -> {
+            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            return body.get();
+        });
     }
 
     // Helper: create a grant where grantor delegates to grantee, return grant id.
@@ -118,20 +121,18 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         UUID grantee = registerDiscoverable("dave");
         UUID grantId = createGrant(grantor, "dave");
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.create(
-                        new CreateSudoTokenCommand(grantee, grantId, "wrong_password")))
-                        .isInstanceOf(InvalidCredentialsException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.create(
+                new CreateSudoTokenCommand(grantee, grantId, "wrong_password"))))
+                .isInstanceOf(InvalidCredentialsException.class);
     }
 
     @Test
     void create_unknownGrant_throwsGrantNotUsable() {
         UUID grantee = register("eve");
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.create(
-                        new CreateSudoTokenCommand(grantee, UUID.randomUUID(), CORRECT_PW)))
-                        .isInstanceOf(GrantNotUsableException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.create(
+                new CreateSudoTokenCommand(grantee, UUID.randomUUID(), CORRECT_PW))))
+                .isInstanceOf(GrantNotUsableException.class);
     }
 
     @Test
@@ -141,10 +142,9 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         UUID outsider = register("hal");
         UUID grantId = createGrant(grantor, "grace");
 
-        runAs(outsider, () ->
-                assertThatThrownBy(() -> sudoTokenService.create(
-                        new CreateSudoTokenCommand(outsider, grantId, CORRECT_PW)))
-                        .isInstanceOf(GrantNotUsableException.class));
+        assertThatThrownBy(() -> runAs(outsider, () -> sudoTokenService.create(
+                new CreateSudoTokenCommand(outsider, grantId, CORRECT_PW))))
+                .isInstanceOf(GrantNotUsableException.class);
     }
 
     @Test
@@ -155,10 +155,9 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
 
         runAs(grantor, () -> accessGrantService.revoke(grantId, grantor));
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.create(
-                        new CreateSudoTokenCommand(grantee, grantId, CORRECT_PW)))
-                        .isInstanceOf(GrantNotUsableException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.create(
+                new CreateSudoTokenCommand(grantee, grantId, CORRECT_PW))))
+                .isInstanceOf(GrantNotUsableException.class);
     }
 
     @Test
@@ -173,10 +172,9 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         setupJdbc().update("UPDATE access_grants SET expires_at = ? WHERE id = ?",
                 Timestamp.from(longAgo), grantId);
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.create(
-                        new CreateSudoTokenCommand(grantee, grantId, CORRECT_PW)))
-                        .isInstanceOf(GrantNotUsableException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.create(
+                new CreateSudoTokenCommand(grantee, grantId, CORRECT_PW))))
+                .isInstanceOf(GrantNotUsableException.class);
     }
 
     // ── verify — happy path ──────────────────────────────────────────────────
@@ -205,24 +203,23 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     void verify_unknownToken_throwsInvalidSudoToken() {
         UUID userId = register("olive");
 
-        runAs(userId, () ->
-                assertThatThrownBy(() ->
-                        sudoTokenService.verify(tokenGenerator.generate().rawToken(), userId))
-                        .isInstanceOf(InvalidSudoTokenException.class));
+        assertThatThrownBy(() -> runAs(userId, () ->
+                sudoTokenService.verify(tokenGenerator.generate().rawToken(), userId)))
+                .isInstanceOf(InvalidSudoTokenException.class);
     }
 
     @Test
     void verify_nullOrBlankToken_throwsInvalidSudoToken() {
         UUID userId = register("pia");
 
-        runAs(userId, () -> {
-            assertThatThrownBy(() -> sudoTokenService.verify(null, userId))
-                    .isInstanceOf(InvalidSudoTokenException.class);
-            assertThatThrownBy(() -> sudoTokenService.verify("", userId))
-                    .isInstanceOf(InvalidSudoTokenException.class);
-            assertThatThrownBy(() -> sudoTokenService.verify("   ", userId))
-                    .isInstanceOf(InvalidSudoTokenException.class);
-        });
+        // null/blank is rejected before any DB access, so no RLS context is needed;
+        // each call's own @Transactional rolls back independently.
+        assertThatThrownBy(() -> sudoTokenService.verify(null, userId))
+                .isInstanceOf(InvalidSudoTokenException.class);
+        assertThatThrownBy(() -> sudoTokenService.verify("", userId))
+                .isInstanceOf(InvalidSudoTokenException.class);
+        assertThatThrownBy(() -> sudoTokenService.verify("   ", userId))
+                .isInstanceOf(InvalidSudoTokenException.class);
     }
 
     @Test
@@ -245,9 +242,8 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
                         + "VALUES (?, ?, ?, ?)",
                 raw.hash(), grantId, grantee, Timestamp.from(longAgo));
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.verify(raw.rawToken(), grantee))
-                        .isInstanceOf(InvalidSudoTokenException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.verify(raw.rawToken(), grantee)))
+                .isInstanceOf(InvalidSudoTokenException.class);
     }
 
     @Test
@@ -263,9 +259,8 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         // Grantor revokes the grant AFTER the sudo token was issued.
         runAs(grantor, () -> accessGrantService.revoke(grantId, grantor));
 
-        runAs(grantee, () ->
-                assertThatThrownBy(() -> sudoTokenService.verify(token.rawToken(), grantee))
-                        .isInstanceOf(InvalidSudoTokenException.class));
+        assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.verify(token.rawToken(), grantee)))
+                .isInstanceOf(InvalidSudoTokenException.class);
     }
 
     @Test
@@ -282,8 +277,7 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         // Outsider tries to verify the grantee's sudo token. RLS hides
         // the row from them; the service-level granteeId filter also
         // rejects independently.
-        runAs(outsider, () ->
-                assertThatThrownBy(() -> sudoTokenService.verify(token.rawToken(), outsider))
-                        .isInstanceOf(InvalidSudoTokenException.class));
+        assertThatThrownBy(() -> runAs(outsider, () -> sudoTokenService.verify(token.rawToken(), outsider)))
+                .isInstanceOf(InvalidSudoTokenException.class);
     }
 }
