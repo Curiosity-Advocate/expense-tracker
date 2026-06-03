@@ -1,0 +1,33 @@
+-- Option-A pivot follow-up (see ADR-0011 "Option A pivot" section).
+--
+-- The v2.0 design ran the setup pool as a dedicated BYPASSRLS role. A BYPASSRLS
+-- role skips RLS even on tables marked FORCE ROW LEVEL SECURITY. On managed
+-- Postgres (Render) we cannot grant BYPASSRLS, so the setup pool instead
+-- connects as the table-owner role and relies on Postgres's automatic
+-- RLS bypass for owners.
+--
+-- BUT owner-bypass does NOT apply to a table that has FORCE ROW LEVEL SECURITY
+-- — FORCE exists precisely to subject the owner to RLS too. So every FORCE-RLS
+-- table that the setup pool must touch WITHOUT a user context becomes
+-- unreachable: the INSERT/UPDATE fails the RESTRICTIVE policy (no
+-- app.current_user_id set) and surfaces as "new row violates row-level
+-- security policy".
+--
+-- The setup pool touches exactly two FORCE-RLS tables without a user context:
+--   * refresh_tokens — login/refresh/logout look up + write tokens by hash
+--                      before any UserPrincipal exists (ADR-0016).
+--   * csv_imports    — CsvImportStartupRecovery scans for stale jobs at boot,
+--                      where there is no JWT at all (ADR-0020).
+-- (users / bank_accounts / user_login_failures are also setup-pool targets but
+--  are not FORCE'd, so owner-bypass already works for them.)
+--
+-- Dropping FORCE on these two tables restores owner-bypass for the setup pool.
+-- RLS itself stays ENABLED, so the application role (expense_app, a NON-owner)
+-- is still fully isolated on these tables — FORCE only ever affected owner
+-- connections, and the only owner connections at runtime are the setup pool
+-- (intended bypass) and Flyway (DDL only). The trade-off: a manual superuser
+-- connection now also bypasses RLS on these two tables. Acceptable on managed
+-- Postgres where BYPASSRLS is unavailable; documented in ADR-0011.
+
+ALTER TABLE refresh_tokens NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE csv_imports    NO FORCE ROW LEVEL SECURITY;
