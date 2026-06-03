@@ -1,10 +1,8 @@
 package com.finance.integration;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -12,7 +10,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -28,15 +25,10 @@ class CsvImportConnectionIntegrationTest extends WebIntegrationTestBase {
     private static final String CSV_URL = "https://www.commbank.com.au/digital/your-statements";
 
     @Autowired TestRestTemplate http;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-
-    private JdbcTemplate appJdbc;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appJdbc.execute("SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute(
+        setupJdbc().execute(
                 "TRUNCATE csv_imports, csv_import_connections, raw_bank_transactions, " +
                 "dead_letters, bank_accounts, refresh_tokens, user_login_failures, users " +
                 "RESTART IDENTITY CASCADE");
@@ -164,11 +156,11 @@ class CsvImportConnectionIntegrationTest extends WebIntegrationTestBase {
     }
 
     private UUID insertBankAccount(String username, String accountName, String accountType) {
-        UUID userId = appJdbc.queryForObject(
+        // Seed via the setup pool (bypasses RLS) — no app.current_user_id needed.
+        UUID userId = setupJdbc().queryForObject(
                 "SELECT id FROM users WHERE username = ?", UUID.class, username);
         UUID accountId = UUID.randomUUID();
-        appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
-        appJdbc.update(
+        setupJdbc().update(
                 "INSERT INTO bank_accounts (id, user_id, name, account_type, is_system) " +
                 "VALUES (?, ?, ?, ?, FALSE)",
                 accountId, userId, accountName, accountType);

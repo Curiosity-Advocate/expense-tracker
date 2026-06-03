@@ -1,10 +1,8 @@
 package com.finance.integration;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -12,7 +10,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -29,19 +26,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DelegationIntegrationTest extends WebIntegrationTestBase {
 
     private static final String CORRECT_PW = "pw_correct";
-    private static final String SET_USER_PREFIX = "SET LOCAL app.current_user_id = '";
     private static final String READ_WRITE = "READ_WRITE";
 
     @Autowired TestRestTemplate http;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-
-    private JdbcTemplate appJdbc;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appJdbc.execute(SET_USER_PREFIX + "00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
     }
 
@@ -61,12 +52,12 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
     }
 
     private UUID userIdByUsername(String username) {
-        return appJdbc.queryForObject("SELECT id FROM users WHERE username = ?",
+        return setupJdbc().queryForObject("SELECT id FROM users WHERE username = ?",
                 UUID.class, username);
     }
 
     private void markDiscoverable(String username) {
-        appJdbc.update("UPDATE users SET is_discoverable = TRUE WHERE username = ?", username);
+        setupJdbc().update("UPDATE users SET is_discoverable = TRUE WHERE username = ?", username);
     }
 
     private UUID createGrant(String grantorToken, String granteeUsername) {
@@ -140,7 +131,7 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
         String sudo  = mintSudoToken(bToken, grantId);
 
         // Alice has a Cash bank account from DefaultUserSetupService at registration.
-        UUID aliceCashAccount = appJdbc.queryForObject(
+        UUID aliceCashAccount = setupJdbc().queryForObject(
                 "SELECT id FROM bank_accounts WHERE user_id = ? AND name = 'Cash'",
                 UUID.class, aliceId);
 
@@ -167,7 +158,7 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
         assertThat(r.getStatusCode().is2xxSuccessful()).isTrue();
 
         // Verify the row landed under Alice's user_id with Bob as the actor.
-        Map<String, Object> row = appJdbc.queryForMap(
+        Map<String, Object> row = setupJdbc().queryForMap(
                 "SELECT user_id, created_by, modified_by FROM expenses "
                         + "WHERE user_id = ? ORDER BY expense_date DESC LIMIT 1",
                 aliceId);

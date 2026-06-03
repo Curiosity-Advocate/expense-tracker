@@ -43,8 +43,7 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
         appJdbc = new JdbcTemplate(appDataSource);
         appTx   = new TransactionTemplate(appTxManager);
 
-        appJdbc.execute("SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
     }
 
     // Helper: register a user (setup pool, no session vars) and return its id.
@@ -74,13 +73,13 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
     @Test
     void insert_onAppPool_withCurrentUserId_populatesBothAuditColumns() {
         UUID userId    = registerWithCashAccount("alice");
-        UUID accountId = appJdbc.queryForObject(
+        UUID accountId = setupJdbc().queryForObject(
                 SQL_BANK_ACCOUNT_BY_USER, UUID.class, userId);
 
-        assertThat((UUID) appJdbc.queryForObject(
+        assertThat((UUID) setupJdbc().queryForObject(
                 "SELECT created_by FROM bank_accounts WHERE id = ?", UUID.class, accountId))
                 .isEqualTo(userId);
-        assertThat((UUID) appJdbc.queryForObject(
+        assertThat((UUID) setupJdbc().queryForObject(
                 "SELECT modified_by FROM bank_accounts WHERE id = ?", UUID.class, accountId))
                 .isEqualTo(userId);
     }
@@ -88,7 +87,7 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
     @Test
     void update_onAppPool_changesModifiedBy_butNotCreatedBy() {
         UUID userA = registerWithCashAccount("bob");
-        UUID accountId = appJdbc.queryForObject(
+        UUID accountId = setupJdbc().queryForObject(
                 SQL_BANK_ACCOUNT_BY_USER, UUID.class, userA);
 
         appTx.executeWithoutResult(status -> {
@@ -96,10 +95,10 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
             appJdbc.update("UPDATE bank_accounts SET name = 'Cash v2' WHERE id = ?", accountId);
         });
 
-        assertThat((UUID) appJdbc.queryForObject(
+        assertThat((UUID) setupJdbc().queryForObject(
                 "SELECT created_by FROM bank_accounts WHERE id = ?", UUID.class, accountId))
                 .isEqualTo(userA);  // unchanged
-        assertThat((UUID) appJdbc.queryForObject(
+        assertThat((UUID) setupJdbc().queryForObject(
                 "SELECT modified_by FROM bank_accounts WHERE id = ?", UUID.class, accountId))
                 .isEqualTo(userA);
     }
@@ -110,7 +109,7 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
     void register_onSetupPool_leavesUserCreatedByAsNull() {
         UUID userId = registerUser("carol");
 
-        UUID createdBy = appJdbc.queryForObject(
+        UUID createdBy = setupJdbc().queryForObject(
                 "SELECT created_by FROM users WHERE id = ?", UUID.class, userId);
         assertThat(createdBy).isNull();
     }
@@ -121,7 +120,7 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
     void update_attemptingToChangeCreatedBy_throws() {
         UUID userId    = registerWithCashAccount("dave");
         UUID otherUser = registerUser("dave_other");
-        UUID accountId = appJdbc.queryForObject(
+        UUID accountId = setupJdbc().queryForObject(
                 SQL_BANK_ACCOUNT_BY_USER, UUID.class, userId);
 
         assertThatThrownBy(() ->
@@ -149,7 +148,7 @@ class AuditTrailIntegrationTest extends IntegrationTestBase {
         // Insert an expense as actor-on-behalf-of-owner via direct JDBC.
         UUID expenseId  = UUID.randomUUID();
         LocalDate today = LocalDate.now();
-        UUID accountId  = appJdbc.queryForObject(
+        UUID accountId  = setupJdbc().queryForObject(
                 SQL_BANK_ACCOUNT_BY_USER, UUID.class, owner);
 
         appTx.executeWithoutResult(status -> {

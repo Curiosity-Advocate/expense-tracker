@@ -4,11 +4,9 @@ import com.finance.command.RegisterCommand;
 import com.finance.domain.RegisteredUser;
 import com.finance.service.AuthService;
 import com.finance.service.UserSetupService;
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Map;
 
@@ -18,15 +16,10 @@ class SetupServiceIntegrationTest extends IntegrationTestBase {
 
     @Autowired AuthService authService;
     @Autowired UserSetupService userSetupService;
-    @Autowired HikariDataSource appDataSource;
-
-    private JdbcTemplate appJdbc;
 
     @BeforeEach
     void wipeUserState() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appJdbc.execute("SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
     }
 
     @Test
@@ -36,7 +29,7 @@ class SetupServiceIntegrationTest extends IntegrationTestBase {
 
         userSetupService.setupNewUser(user.userId());
 
-        var rows = appJdbc.queryForList(
+        var rows = setupJdbc().queryForList(
                 "SELECT name, account_type, is_system FROM bank_accounts " +
                 "WHERE user_id = ? ORDER BY name",
                 user.userId());

@@ -41,8 +41,9 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
     void wipe() {
         appJdbc = new JdbcTemplate(appDataSource);
         appTx   = new TransactionTemplate(appTxManager);
-        appJdbc.execute("SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, access_grants, users RESTART IDENTITY CASCADE");
+        // TRUNCATE via the setup pool (bypasses RLS, not subject to it anyway);
+        // avoids leaving app.current_user_id = '' on a pooled app connection.
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, access_grants, users RESTART IDENTITY CASCADE");
     }
 
     // Helpers — register a user, optionally mark as discoverable. is_discoverable
@@ -55,7 +56,7 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
 
     private UUID registerDiscoverable(String username) {
         UUID id = register(username);
-        appJdbc.update("UPDATE users SET is_discoverable = TRUE WHERE id = ?", id);
+        setupJdbc().update("UPDATE users SET is_discoverable = TRUE WHERE id = ?", id);
         return id;
     }
 
@@ -191,7 +192,7 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
 
         runAs(grantor, () -> accessGrantService.revoke(grantId, grantor));
 
-        Instant revokedAt = appJdbc.queryForObject(
+        Instant revokedAt = setupJdbc().queryForObject(
                 "SELECT revoked_at FROM access_grants WHERE id = ?",
                 (rs, n) -> rs.getTimestamp("revoked_at").toInstant(),
                 grantId);
@@ -210,7 +211,7 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         // Grantee can revoke their own delegation too — "I don't want this access".
         runAs(grantee, () -> accessGrantService.revoke(grantId, grantee));
 
-        Instant revokedAt = appJdbc.queryForObject(
+        Instant revokedAt = setupJdbc().queryForObject(
                 "SELECT revoked_at FROM access_grants WHERE id = ?",
                 (rs, n) -> rs.getTimestamp("revoked_at").toInstant(),
                 grantId);

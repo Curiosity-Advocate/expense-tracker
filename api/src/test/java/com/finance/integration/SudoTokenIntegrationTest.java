@@ -51,8 +51,7 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     void wipe() {
         appJdbc = new JdbcTemplate(appDataSource);
         appTx   = new TransactionTemplate(appTxManager);
-        appJdbc.execute(SET_USER_PREFIX + "00000000-0000-0000-0000-000000000000'");
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
     }
 
@@ -63,7 +62,7 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
 
     private UUID registerDiscoverable(String username) {
         UUID id = register(username);
-        appJdbc.update("UPDATE users SET is_discoverable = TRUE WHERE id = ?", id);
+        setupJdbc().update("UPDATE users SET is_discoverable = TRUE WHERE id = ?", id);
         return id;
     }
 
@@ -104,7 +103,7 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         assertThat(token.expiresAt()).isAfter(Instant.now());
 
         String hash = tokenGenerator.hash(token.rawToken());
-        Integer count = appJdbc.queryForObject(
+        Integer count = setupJdbc().queryForObject(
                 "SELECT COUNT(*) FROM sudo_tokens WHERE token_hash = ?", Integer.class, hash);
         assertThat(count).isEqualTo(1);
     }
@@ -235,7 +234,7 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
         // 15-min default. INSERT isn't subject to the no-update lock so the
         // values land as specified.
         var raw = tokenGenerator.generate();
-        UUID grantId = appJdbc.queryForObject(
+        UUID grantId = setupJdbc().queryForObject(
                 "SELECT id FROM access_grants WHERE grantor_id = ?", UUID.class, grantor);
         Instant longAgo = Instant.now().minus(1, ChronoUnit.HOURS);
 

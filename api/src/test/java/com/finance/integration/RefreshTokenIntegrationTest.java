@@ -10,12 +10,9 @@ import com.finance.exception.RefreshTokenReuseException;
 import com.finance.security.SecureTokenGenerator;
 import com.finance.security.SecureTokenGenerator.GeneratedToken;
 import com.finance.service.AuthService;
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
@@ -32,16 +29,11 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
     @Autowired AuthService authService;
     @Autowired SecureTokenGenerator tokenGenerator;
     @Autowired NamedParameterJdbcTemplate setupJdbcTemplate;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-
-    private JdbcTemplate appJdbc;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appJdbc.execute("SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'");
         // ON DELETE CASCADE on refresh_tokens.user_id wipes refresh rows alongside.
-        appJdbc.execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
+        setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, users RESTART IDENTITY CASCADE");
     }
 
     private TokenPair registerAndLogin(String username) {
@@ -68,13 +60,13 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
     @Test
     void refresh_chainOfRotations_preservesSessionStartedAtAndExpiresAt() {
         TokenPair pair = registerAndLogin("bob");
-        UUID userId = appJdbc.queryForObject(
+        UUID userId = setupJdbc().queryForObject(
                 "SELECT id FROM users WHERE username = 'bob'", UUID.class);
 
-        Instant originalSessionStartedAt = appJdbc.queryForObject(
+        Instant originalSessionStartedAt = setupJdbc().queryForObject(
                 "SELECT session_started_at FROM refresh_tokens WHERE user_id = ? AND rotated_from IS NULL",
                 (rs, n) -> rs.getTimestamp("session_started_at").toInstant(), userId);
-        Instant originalExpiresAt = appJdbc.queryForObject(
+        Instant originalExpiresAt = setupJdbc().queryForObject(
                 "SELECT expires_at FROM refresh_tokens WHERE user_id = ? AND rotated_from IS NULL",
                 (rs, n) -> rs.getTimestamp("expires_at").toInstant(), userId);
 
@@ -83,11 +75,11 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
             pair = authService.refresh(new RefreshTokenCommand(pair.refreshToken()));
         }
 
-        Instant latestSessionStartedAt = appJdbc.queryForObject(
+        Instant latestSessionStartedAt = setupJdbc().queryForObject(
                 "SELECT session_started_at FROM refresh_tokens " +
                 "WHERE user_id = ? AND revoked_at IS NULL",
                 (rs, n) -> rs.getTimestamp("session_started_at").toInstant(), userId);
-        Instant latestExpiresAt = appJdbc.queryForObject(
+        Instant latestExpiresAt = setupJdbc().queryForObject(
                 "SELECT expires_at FROM refresh_tokens " +
                 "WHERE user_id = ? AND revoked_at IS NULL",
                 (rs, n) -> rs.getTimestamp("expires_at").toInstant(), userId);
@@ -106,7 +98,7 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
         String firstHash  = tokenGenerator.hash(first.refreshToken());
         String secondHash = tokenGenerator.hash(second.refreshToken());
 
-        String rotatedFrom = appJdbc.queryForObject(
+        String rotatedFrom = setupJdbc().queryForObject(
                 "SELECT rotated_from FROM refresh_tokens WHERE token_hash = ?",
                 String.class, secondHash);
         assertThat(rotatedFrom).isEqualTo(firstHash);
@@ -175,9 +167,9 @@ class RefreshTokenIntegrationTest extends IntegrationTestBase {
         TokenPair phone  = authService.login(new LoginCommand("frank", "pw_correct"));
         TokenPair laptop = authService.login(new LoginCommand("frank", "pw_correct"));
 
-        UUID userId = appJdbc.queryForObject(
+        UUID userId = setupJdbc().queryForObject(
                 "SELECT id FROM users WHERE username = 'frank'", UUID.class);
-        Integer chainStarts = appJdbc.queryForObject(
+        Integer chainStarts = setupJdbc().queryForObject(
                 "SELECT COUNT(*) FROM refresh_tokens " +
                 "WHERE user_id = ? AND rotated_from IS NULL AND revoked_at IS NULL",
                 Integer.class, userId);

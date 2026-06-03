@@ -1,10 +1,8 @@
 package com.finance.integration;
 
-import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
@@ -13,7 +11,6 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 
@@ -34,7 +31,6 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
 
     private static final String PASSWORD = "pw_correct_12345";
     private static final Duration COMPLETION_TIMEOUT = Duration.ofSeconds(10);
-    private static final String RESET_RLS = "SET LOCAL app.current_user_id = '00000000-0000-0000-0000-000000000000'";
 
     private static final String CBA_CSV = """
             07/07/2025,-500,Transfer to xxx567 from CBA app,300
@@ -43,15 +39,10 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
             """;
 
     @Autowired TestRestTemplate http;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
-
-    private JdbcTemplate appJdbc;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appJdbc.execute(RESET_RLS);
-        appJdbc.execute(
+        setupJdbc().execute(
                 "TRUNCATE csv_imports, csv_import_connections, raw_bank_transactions, " +
                 "dead_letters, bank_accounts, refresh_tokens, user_login_failures, users " +
                 "RESTART IDENTITY CASCADE");
@@ -74,19 +65,17 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
         assertThat((Integer) finalStatus.get("dedupedCount")).isEqualTo(0);
         assertThat((Integer) finalStatus.get("parseErrorCount")).isEqualTo(0);
 
-        // Verify rows persisted
-        runAs(s.userId, () -> {
-            Integer rowCount = appJdbc.queryForObject(
-                    "SELECT COUNT(*) FROM raw_bank_transactions WHERE user_id = ?",
-                    Integer.class, s.userId);
-            assertThat(rowCount).isEqualTo(3);
+        // Verify rows persisted (setup pool bypasses RLS).
+        Integer rowCount = setupJdbc().queryForObject(
+                "SELECT COUNT(*) FROM raw_bank_transactions WHERE user_id = ?",
+                Integer.class, s.userId);
+        assertThat(rowCount).isEqualTo(3);
 
-            // Connection updated
-            String lastDate = appJdbc.queryForObject(
-                    "SELECT last_date_to::text FROM csv_import_connections WHERE bank_account_id = ?",
-                    String.class, s.bankAccountId);
-            assertThat(lastDate).isEqualTo("2025-07-07");
-        });
+        // Connection updated
+        String lastDate = setupJdbc().queryForObject(
+                "SELECT last_date_to::text FROM csv_import_connections WHERE bank_account_id = ?",
+                String.class, s.bankAccountId);
+        assertThat(lastDate).isEqualTo("2025-07-07");
     }
 
     @Test
@@ -96,23 +85,21 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
         UUID importId = UUID.fromString((String) upload.getBody().get("importId"));
         waitForCompletion(importId, s.token);
 
-        runAs(s.userId, () -> {
-            List<Map<String, Object>> rows = appJdbc.queryForList(
-                    "SELECT prev_hash, current_hash FROM raw_bank_transactions " +
-                    "WHERE user_id = ? ORDER BY fetched_at ASC",
-                    s.userId);
-            assertThat(rows).isNotEmpty();
-            // First row has prev_hash = NULL
-            assertThat(rows.get(0).get("prev_hash")).isNull();
-            // Subsequent rows have prev_hash = previous row's current_hash
-            for (int i = 1; i < rows.size(); i++) {
-                String prev = (String) rows.get(i).get("prev_hash");
-                String prevCurrent = (String) rows.get(i - 1).get("current_hash");
-                assertThat(prev)
-                        .as("row " + i + " prev_hash should equal row " + (i - 1) + " current_hash")
-                        .isEqualTo(prevCurrent);
-            }
-        });
+        List<Map<String, Object>> rows = setupJdbc().queryForList(
+                "SELECT prev_hash, current_hash FROM raw_bank_transactions " +
+                "WHERE user_id = ? ORDER BY fetched_at ASC",
+                s.userId);
+        assertThat(rows).isNotEmpty();
+        // First row has prev_hash = NULL
+        assertThat(rows.get(0).get("prev_hash")).isNull();
+        // Subsequent rows have prev_hash = previous row's current_hash
+        for (int i = 1; i < rows.size(); i++) {
+            String prev = (String) rows.get(i).get("prev_hash");
+            String prevCurrent = (String) rows.get(i - 1).get("current_hash");
+            assertThat(prev)
+                    .as("row " + i + " prev_hash should equal row " + (i - 1) + " current_hash")
+                    .isEqualTo(prevCurrent);
+        }
     }
 
     @Test
@@ -138,9 +125,9 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
         ResponseEntity<Map> first = uploadCsv(s.bankAccountId, s.token, CBA_CSV.getBytes(StandardCharsets.UTF_8));
         waitForCompletion(UUID.fromString((String) first.getBody().get("importId")), s.token);
 
-        // Age the prior import past 7 days so rate-limit doesn't block.
-        appJdbc.execute(RESET_RLS);
-        appJdbc.update("UPDATE csv_imports SET completed_at = NOW() - INTERVAL '8 days'");
+        // Age the prior import past 7 days so rate-limit doesn't block
+        // (setup pool bypasses RLS).
+        setupJdbc().update("UPDATE csv_imports SET completed_at = NOW() - INTERVAL '8 days'");
 
         ResponseEntity<Map> second = uploadCsv(s.bankAccountId, s.token, CBA_CSV.getBytes(StandardCharsets.UTF_8));
         assertThat(second.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
@@ -154,9 +141,11 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
     @org.springframework.beans.factory.annotation.Autowired
     private com.finance.bankintegration.service.CsvImportStartupRecovery recovery;
 
+    // Named-param template on the setup pool, for the named INSERT below.
+    // (Distinct from the base class's setupJdbc() JdbcTemplate accessor.)
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.beans.factory.annotation.Qualifier("setupJdbcTemplate")
-    private org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate setupJdbc;
+    private org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate setupNamedJdbc;
 
     @Test
     void startupRecoveryResetsStaleRunningRowAndCompletes() {
@@ -164,7 +153,7 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
 
         // Insert a stale RUNNING row directly via the setup pool (bypasses RLS).
         UUID importId = UUID.randomUUID();
-        setupJdbc.update("""
+        setupNamedJdbc.update("""
                 INSERT INTO csv_imports
                     (id, bank_account_id, user_id, status, exported_on_date,
                      parser_version_tag, raw_csv_bytes,
@@ -222,8 +211,7 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
     }
 
     private UUID userIdByUsername(String username) {
-        appJdbc.execute(RESET_RLS);
-        return appJdbc.queryForObject("SELECT id FROM users WHERE username = ?", UUID.class, username);
+        return setupJdbc().queryForObject("SELECT id FROM users WHERE username = ?", UUID.class, username);
     }
 
     private String login(String username) {
@@ -234,8 +222,7 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
 
     private UUID insertBankAccount(UUID userId, String name, String type) {
         UUID id = UUID.randomUUID();
-        appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
-        appJdbc.update(
+        setupJdbc().update(
                 "INSERT INTO bank_accounts (id, user_id, name, account_type, is_system) " +
                 "VALUES (?, ?, ?, ?, FALSE)",
                 id, userId, name, type);
@@ -275,11 +262,6 @@ class CsvImportIntegrationTest extends WebIntegrationTestBase {
             try { Thread.sleep(100); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         }
         throw new AssertionError("Import " + importId + " did not complete within " + COMPLETION_TIMEOUT);
-    }
-
-    private void runAs(UUID userId, Runnable r) {
-        appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
-        r.run();
     }
 
     private HttpHeaders bearer(String token) {
