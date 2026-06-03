@@ -13,12 +13,12 @@ import com.finance.security.SecureTokenGenerator;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
 import com.finance.service.SudoTokenService;
-import com.zaxxer.hikari.HikariDataSource;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -40,16 +40,15 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     @Autowired AccessGrantService accessGrantService;
     @Autowired SudoTokenService sudoTokenService;
     @Autowired SecureTokenGenerator tokenGenerator;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
     @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
 
-    private JdbcTemplate appJdbc;
+    @PersistenceContext EntityManager entityManager;
+
     private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appTx   = new TransactionTemplate(appTxManager);
+        appTx = new TransactionTemplate(appTxManager);
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
     }
@@ -73,16 +72,26 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     // it as UnexpectedRollbackException).
     private void runAs(UUID userId, Runnable body) {
         appTx.executeWithoutResult(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            setRlsUser(userId);
             body.run();
         });
     }
 
     private <T> T runAsReturning(UUID userId, Supplier<T> body) {
         return appTx.execute(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            setRlsUser(userId);
             return body.get();
         });
+    }
+
+    // Set app.current_user_id via the EntityManager so it lands on the exact
+    // connection Hibernate uses for the service's writes (a JdbcTemplate can pick
+    // a different pooled connection). The service's @Transactional joins this tx.
+    private void setRlsUser(UUID userId) {
+        entityManager
+                .createNativeQuery("SELECT set_config('app.current_user_id', :uid, true)")
+                .setParameter("uid", userId.toString())
+                .getSingleResult();
     }
 
     // Helper: create a grant where grantor delegates to grantee, return grant id.

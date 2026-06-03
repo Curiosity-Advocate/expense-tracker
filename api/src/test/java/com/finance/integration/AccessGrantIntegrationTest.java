@@ -9,12 +9,12 @@ import com.finance.exception.GranteeNotDiscoverableException;
 import com.finance.exception.SelfGrantNotAllowedException;
 import com.finance.service.AccessGrantService;
 import com.finance.service.AuthService;
-import com.zaxxer.hikari.HikariDataSource;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -32,16 +32,15 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
 
     @Autowired AuthService authService;
     @Autowired AccessGrantService accessGrantService;
-    @Autowired @Qualifier("appDataSource") HikariDataSource appDataSource;
     @Autowired @Qualifier("appTransactionManager") PlatformTransactionManager appTxManager;
 
-    private JdbcTemplate appJdbc;
+    @PersistenceContext EntityManager entityManager;
+
     private TransactionTemplate appTx;
 
     @BeforeEach
     void wipe() {
-        appJdbc = new JdbcTemplate(appDataSource);
-        appTx   = new TransactionTemplate(appTxManager);
+        appTx = new TransactionTemplate(appTxManager);
         // TRUNCATE via the setup pool (bypasses RLS, not subject to it anyway).
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, access_grants, users RESTART IDENTITY CASCADE");
     }
@@ -60,10 +59,12 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         return id;
     }
 
-    // Run a service call as the given user: SET LOCAL app.current_user_id within
-    // an outer transaction so it shares the connection the service's @Transactional
-    // joins (the RlsSessionAspect skips, since there's no SecurityContext, leaving
-    // our value in place). Same pattern as AuditTrailIntegrationTest.
+    // Run a service call as the given user. We set app.current_user_id through the
+    // EntityManager (not a JdbcTemplate) so it lands on the exact connection
+    // Hibernate uses for the service's INSERT — a raw JdbcTemplate can resolve to
+    // a different pooled connection, leaving the JPA insert without RLS context.
+    // The service's @Transactional joins this outer tx; RlsSessionAspect skips
+    // (no SecurityContext) so our value stands.
     //
     // For tests that expect the service to throw, put assertThatThrownBy OUTSIDE
     // runAs: the exception propagates out of the callback and TransactionTemplate
@@ -71,9 +72,16 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
     // happens when the callback returns normally on a rollback-only tx).
     private void runAs(UUID userId, Runnable body) {
         appTx.executeWithoutResult(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            setRlsUser(userId);
             body.run();
         });
+    }
+
+    private void setRlsUser(UUID userId) {
+        entityManager
+                .createNativeQuery("SELECT set_config('app.current_user_id', :uid, true)")
+                .setParameter("uid", userId.toString())
+                .getSingleResult();
     }
 
     // ── create ───────────────────────────────────────────────────────────────
@@ -258,10 +266,10 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
                 .isInstanceOf(GrantNotFoundException.class);
     }
 
-    // Value-returning variant of runAs (same SET LOCAL-in-transaction approach).
+    // Value-returning variant of runAs (same EntityManager set_config approach).
     private <T> T runAsReturning(UUID userId, Supplier<T> body) {
         return appTx.execute(status -> {
-            appJdbc.execute("SET LOCAL app.current_user_id = '" + userId + "'");
+            setRlsUser(userId);
             return body.get();
         });
     }
