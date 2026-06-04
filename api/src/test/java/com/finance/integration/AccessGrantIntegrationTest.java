@@ -92,6 +92,17 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantee = registerDiscoverable("bob");
 
         runAs(grantor, () -> {
+            Object before = entityManager
+                    .createNativeQuery("SELECT current_setting('app.current_user_id', true)")
+                    .getSingleResult();
+            entityManager
+                    .createNativeQuery("SELECT user_id FROM find_discoverable_user('bob')")
+                    .getResultList();
+            Object after = entityManager
+                    .createNativeQuery("SELECT current_setting('app.current_user_id', true)")
+                    .getSingleResult();
+            System.out.println("[DIAG] grantor=" + grantor + " before=" + before + " afterFn=" + after);
+
             AccessGrant g = accessGrantService.create(
                     new CreateAccessGrantCommand(grantor, "bob", READ_WRITE, 7));
 
