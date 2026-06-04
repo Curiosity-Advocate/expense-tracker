@@ -34,6 +34,12 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
     void wipe() {
         setupJdbc().execute("TRUNCATE user_login_failures, bank_accounts, sudo_tokens, "
                 + "access_grants, users RESTART IDENTITY CASCADE");
+        // TRUNCATE users CASCADE also wipes the V14-seeded global system
+        // categories (categories.user_id FKs to users). Re-seed the one the
+        // delegated-expense test uses so the category lookup resolves.
+        setupJdbc().update("INSERT INTO categories (id, user_id, name, description) "
+                + "VALUES (gen_random_uuid(), NULL, 'Uncategorised', 'Default for unsorted expenses') "
+                + "ON CONFLICT DO NOTHING");
     }
 
     // ── Helpers — HTTP-driven setup ──────────────────────────────────────────
@@ -155,7 +161,7 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
                 new HttpEntity<>(expense, h),
                 Map.class);
 
-        assertThat("status=" + r.getStatusCode() + " body=" + r.getBody()).as("DIAG").isEqualTo("SHOW_ME");
+        assertThat(r.getStatusCode().is2xxSuccessful()).isTrue();
 
         // Verify the row landed under Alice's user_id with Bob as the actor.
         Map<String, Object> row = setupJdbc().queryForMap(
