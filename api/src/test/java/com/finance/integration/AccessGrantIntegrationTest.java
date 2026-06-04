@@ -101,7 +101,8 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
             Object after = entityManager
                     .createNativeQuery("SELECT current_setting('app.current_user_id', true)")
                     .getSingleResult();
-            System.out.println("[DIAG] grantor=" + grantor + " before=" + before + " afterFn=" + after);
+            assertThat("before=[" + before + "] afterFn=[" + after + "] grantor=[" + grantor + "]")
+                    .as("DIAG").isEqualTo("SHOW_ME");
 
             AccessGrant g = accessGrantService.create(
                     new CreateAccessGrantCommand(grantor, "bob", READ_WRITE, 7));
