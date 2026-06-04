@@ -85,6 +85,8 @@ This sidesteps cross-source dedup (which is genuinely hard because descriptions 
 
 **Why not stream and respond as we go (SSE / chunked):** more complex client-side; doesn't fit the existing JSON-everywhere pattern.
 
+**Upload transaction boundary (corrected 2026-06-04).** `upload()` is `@Transactional`: the connection lookup, rate-limit check, and the PENDING `csv_imports` INSERT are all RLS-scoped, so the method needs `RlsSessionAspect` to set `app.current_user_id` — which the aspect only does for `@Transactional` methods. The original implementation left `upload()` (and `status()` / the connection `get()`) **non-transactional** on the theory that each repository call would manage its own tx; the consequence was that no RLS context was ever set and every upload and status read returned `404`. (It never surfaced because the CSV integration tests weren't running — see [testing-strategy.md](../architecture/testing-strategy.md).) The async kickoff that still has to happen *after* the row is committed (so the async thread sees it) is now registered as an `afterCommit` transaction synchronization rather than relying on the method not being transactional.
+
 ### 6. `@Async` in the API process, not the worker module
 
 Considered moving CSV processing to the worker module via a job-queue table (the same pattern B3's normalisation worker uses). Rejected because:
@@ -154,6 +156,7 @@ The scan runs without any user context (there's no JWT at process start), so it 
 - The module is **untested at the parser-correctness level for ANZ, AMP, and Suncorp** — those parsers used best-guess formats during B1.4 and need real CSV samples to verify. CBA, Ubank, and Qudos parsers have unit tests against verified samples.
 - The setup pool's RLS-bypass reach grew to include `csv_imports` (was only `users`, `bank_accounts`, `user_login_failures`, `refresh_tokens`, `sudo_tokens` for the auth flows). Each addition needs scrutiny — see ADR-0011. Under the Option-A pivot the per-table grants are vestigial (owner-bypass is unconditional), which makes this point *more* important: the audit lives in the migration files, not in Postgres-enforced permissions.
 - Startup recovery resets counters to 0 on retry, which means displayed `dedupedCount` after a retry is inflated (counts re-imports of previously-inserted rows as dedupes). Documented behaviour; acceptable for personal scale.
+- **Shipped non-functional until 2026-06-04.** `csv_imports`, `csv_import_connections`, and `raw_bank_transactions` were created with `AS RESTRICTIVE` RLS policies and no permissive policy = default-deny, so the app pool could not touch them; combined with the non-`@Transactional` read paths (above), the entire CSV flow returned `404`. Fixed in V34 (permissive policies — see [ADR-0011](0011-three-layer-rls-defence.md)) and by adding `@Transactional`. The `CsvImportIntegrationTest` end-to-end test now passes.
 
 **Neutral:**
 

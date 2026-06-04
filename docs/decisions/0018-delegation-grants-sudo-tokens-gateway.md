@@ -2,7 +2,7 @@
 
 > **Context:** Covers v2.0 items D1, D2, D3 — the three-piece delegation mechanism — as a single coherent feature. Driven by: F7–F13, N10. Builds on [ADR-0011](0011-three-layer-rls-defence.md) (three-layer RLS) and [ADR-0017](0017-row-level-audit-trail.md) (audit columns).
 
-**Status:** Accepted. Adopted in v2.0 (D1 + D2 + D3, V24 + V25, 2026-05-31).
+**Status:** Accepted. Adopted in v2.0 (D1 + D2 + D3, V24 + V25, 2026-05-31). End-to-end behaviour first *verified* 2026-06-04 — see "Correctness note" below; the original release shipped non-functional over the app pool because its integration tests never executed.
 
 ---
 
@@ -24,6 +24,8 @@ The constraints:
 ### D1 — `access_grants`
 
 Persists "user A allows user B to act on A's data until expires_at" as a row in a new `access_grants` table. CRUD API under `/api/v1/users/me/access-grants`. Grants are 1–30 days, soft-revocable by either party, and require the grantee to have `is_discoverable = TRUE` (opt-in to receive grants). Grants exist as records and can be created/listed/revoked at runtime, but **they do not by themselves enable any cross-user data access** — they're just authorisation records.
+
+Resolving the grantee is itself a cross-user read (A creating a grant must look up B), which the own-row `users` RLS policy blocks. It goes through the `find_discoverable_user` `SECURITY DEFINER` function (V33) — see [ADR-0011 "Controlled cross-user reads"](0011-three-layer-rls-defence.md). Listing grants resolves each counterparty's username the same way (`username_of`).
 
 ### D2 — `sudo_tokens`
 
@@ -118,11 +120,23 @@ Same rationale as [`InvalidCredentialsException`](../../core/src/main/java/com/f
 - **Per-row delegation flag on `expenses`.** Considered: `expenses.delegated_modified BOOLEAN`. Rejected because audit columns (S5) plus the grant_id-stretch (v3.0) cover the forensic question more flexibly. Per-row flag also doesn't compose well with future "view this row from delegation's perspective" features.
 - **No scope restriction (delegation works everywhere).** Rejected. Auth endpoints under delegation would be catastrophic (B could mint a sudo token while acting as A, then act as anyone). Profile updates under delegation would let a delegate change A's email and reset A's password. Allow-list is the only safe default.
 
+## Correctness note (2026-06-04)
+
+The design above is sound, but the v2.0 release of it was **non-functional over the application connection** and nobody noticed, because the `AccessGrant`/`SudoToken`/`Delegation` integration tests never executed (the suite-wide `useJUnitPlatform()` gap — see [testing-strategy.md](../architecture/testing-strategy.md)). When the tests were turned on, three real defects surfaced and were fixed:
+
+1. **`access_grants` and `sudo_tokens` policies were `AS RESTRICTIVE` with no permissive policy** → default-deny → the app role could not create or read a grant or a sudo token at all. Fixed in V34 (now `PERMISSIVE`). This alone meant grant creation, listing, sudo-token minting, and every delegated request returned 5xx/empty.
+2. **Grantee discovery returned nothing** — the lookup ran under the grantor's RLS context, which hides other users. Fixed with the V33 SECURITY DEFINER functions (now part of D1 above).
+3. **`SudoTokenService.verify` and the controller paths needed an RLS context** — verify is `@Transactional(readOnly = true)` so `RlsSessionAspect` sets `app.current_user_id` before the token lookup; this was already correct, but the surrounding CSV-import reads were not (see [ADR-0020](0020-csv-import-architecture.md)).
+
+The mechanism (grant → sudo token → filter → session variables) was always correct; the failures were in the supporting RLS plumbing. The `DelegationIntegrationTest` end-to-end test now passes and is the guard against regression.
+
 ## Operational notes
 
 - **Migrations:**
   - [V24__create_access_grants.sql](../../adapters/src/main/resources/db/migration/V24__create_access_grants.sql) (D1)
   - [V25__create_sudo_tokens.sql](../../adapters/src/main/resources/db/migration/V25__create_sudo_tokens.sql) (D2)
+  - [V33__discoverable_user_lookup_functions.sql](../../adapters/src/main/resources/db/migration/V33__discoverable_user_lookup_functions.sql) — SECURITY DEFINER grantee/username lookups
+  - [V34__rls_policies_permissive_not_restrictive.sql](../../adapters/src/main/resources/db/migration/V34__rls_policies_permissive_not_restrictive.sql) — makes `access_grants`/`sudo_tokens` policies actually grant the parties access (they were default-deny)
 - **Filter chain order:** `TraceIdFilter → JwtAuthenticationFilter → AsUserIdFilter → controller`.
 - **Endpoints introduced:**
   - `POST /api/v1/users/me/access-grants`, `GET /api/v1/users/me/access-grants`, `DELETE /api/v1/users/me/access-grants/{id}` (D1)

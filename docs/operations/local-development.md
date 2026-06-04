@@ -98,12 +98,14 @@ Both are harmless for development. See [scheduled-jobs.md](scheduled-jobs.md) fo
 ## Running the tests
 
 ```bash
-./gradlew test          # all modules
-./gradlew :api:test     # API only
+./gradlew test          # all modules (unit + Testcontainers integration)
+./gradlew :api:test     # API — includes the @SpringBootTest integration suite
 ./gradlew :core:test    # core (pure Java, no Spring context)
 ```
 
-> **Note — there are no tests yet.** The Spring Boot starter-test dependency is declared in every module's `build.gradle`, so the `test` task exists and runs without error, but `src/test/` is empty across the project. Establishing the unit-testing strategy and writing the foundational tests is step 3 of the in-flight work plan (see [../roadmap.md](../roadmap.md)).
+> **The integration tests need Docker.** The `api` module's `@SpringBootTest` tests spin up a real PostgreSQL via Testcontainers, so a running Docker daemon is required (one of the prerequisites above). A warm full run is ~1 minute; a cold first run pulls the `postgres:16-alpine` image and takes longer.
+>
+> **`useJUnitPlatform()` is load-bearing.** It's configured once in the root `build.gradle`. Without it, Gradle's JUnit-4 runner silently discovers none of the JUnit-5 tests and `gradle test` "passes" having run nothing — do not remove it. See [../architecture/testing-strategy.md](../architecture/testing-strategy.md) for the full strategy, the RLS-in-tests patterns, and the coverage map. CI runs the whole suite (`--continue`) on every push and is the authoritative gate.
 
 ---
 

@@ -139,7 +139,7 @@ curl -s -X PATCH "$BASE/users/me" \
 
 ## 5. List categories
 
-System categories are pre-seeded (UNCATEGORISED, GROCERIES, DINING, TRANSPORT, UTILITIES, RENT, ENTERTAINMENT, HEALTHCARE). RLS shows you those plus any you've created.
+System categories are pre-seeded — `Uncategorised`, `Groceries`, `Dining`, `Transport`, `Utilities`, `Rent`, `Health`, `Entertainment`, `Shopping`, `Travel`, `Education`, `Insurance`, `Investments`, `Gifts`, `Other` (title case, matched exactly by the API). RLS shows you those plus any you've created.
 
 ```bash
 curl -s "$BASE/categories" -H "Authorization: Bearer $ACCESS" | jq '.data[] | .name'
@@ -176,7 +176,7 @@ curl -s -X POST "$BASE/expenses" \
     \"amount\":         42.50,
     \"merchantName\":   \"Woolworths\",
     \"expenseDate\":    \"2026-06-01\",
-    \"categories\":     [\"GROCERIES\"],
+    \"categories\":     [\"Groceries\"],
     \"notes\":          \"Weekly shop\",
     \"paymentMethod\":  \"CREDIT_CARD\",
     \"bankAccountId\":  \"$CASH_ID\"
@@ -188,7 +188,7 @@ Response (`201 Created`) returns the full expense with server-computed even spli
 ## 9. List expenses with filters
 
 ```bash
-curl -s "$BASE/expenses?dateFrom=2026-06-01&dateTo=2026-06-30&categories=GROCERIES&pageSize=10" \
+curl -s "$BASE/expenses?dateFrom=2026-06-01&dateTo=2026-06-30&categories=Groceries&pageSize=10" \
   -H "Authorization: Bearer $ACCESS" | jq .
 ```
 
@@ -219,7 +219,7 @@ Bank-imported expenses reject updates to `amount`, `merchantName`, `expenseDate`
 
 ```bash
 GROCERIES_ID=$(curl -s "$BASE/categories" -H "Authorization: Bearer $ACCESS" \
-               | jq -r '.data[] | select(.name == "GROCERIES") | .id')
+               | jq -r '.data[] | select(.name == "Groceries") | .id')
 
 curl -s -X POST "$BASE/targets" \
   -H "Content-Type: application/json" \
@@ -480,7 +480,7 @@ System Operations actually contains two bands sitting side by side.
 - F16. User can update their own category name and description
 - F17. Categories can be self-referential — a category can have a parent
 - F18. Categories cannot be deleted in version 1.0
-- F19. Every expense has at least one category — UNCATEGORISED if none specified
+- F19. Every expense has at least one category — Uncategorised if none specified
 
 **Expenses**
 - F20. User can create a manual expense with amount, merchant, date, categories, payment method, bank account, notes
@@ -1203,7 +1203,7 @@ sequenceDiagram
     end
 
     alt categories empty
-        BL->>BL: Substitute UNCATEGORISED
+        BL->>BL: Substitute Uncategorised
     else categories provided
         BL->>DB: Resolve category names to IDs
         alt Category not found
@@ -1234,7 +1234,7 @@ sequenceDiagram
   "amount": 42.50,
   "merchantName": "Woolworths",
   "expenseDate": "2026-05-08",
-  "categories": ["GROCERIES", "HOUSEHOLD"],
+  "categories": ["Groceries", "Dining"],
   "notes": "Weekly shop",
   "paymentMethod": "CREDIT_CARD",
   "bankAccountId": "uuid"
@@ -1245,7 +1245,7 @@ sequenceDiagram
 - `amount` non-null, numeric
 - `merchantName` non-null, non-blank
 - `expenseDate` non-null, valid date format
-- `categories` optional — empty list substitutes UNCATEGORISED
+- `categories` optional — empty list substitutes Uncategorised
 - `bankAccountId` optional — null substitutes system CASH account
 - `idempotencyKey` optional — if absent no idempotency protection
 
@@ -1265,10 +1265,10 @@ sequenceDiagram
     "amount": 42.50,
     "merchantName": "Woolworths",
     "expenseDate": "2026-05-08",
-    "categories": ["GROCERIES", "HOUSEHOLD"],
+    "categories": ["Groceries", "Dining"],
     "categoryWeights": {
-      "GROCERIES": 21.25,
-      "HOUSEHOLD": 21.25
+      "Groceries": 21.25,
+      "Dining": 21.25
     },
     "notes": "Weekly shop",
     "paymentMethod": "CREDIT_CARD",
@@ -1398,7 +1398,7 @@ sequenceDiagram
     "periodTo": "2026-05-08",
     "groups": [
       {
-        "groupKey": "GROCERIES",
+        "groupKey": "Groceries",
         "totalAmount": 423.75,
         "transactionCount": 8,
         "percentageOfTotal": 34.1
@@ -1438,7 +1438,7 @@ sequenceDiagram
   "amount": 50.00,
   "merchantName": "Woolworths Metro",
   "expenseDate": "2026-05-08",
-  "categories": ["GROCERIES"],
+  "categories": ["Groceries"],
   "notes": "Updated note",
   "paymentMethod": "DEBIT_CARD"
 }
@@ -1588,7 +1588,7 @@ sequenceDiagram
     "categories": [
       {
         "categoryId": "uuid",
-        "categoryName": "DINING",
+        "categoryName": "Dining",
         "participation": "INCLUSIVE"
       }
     ],
@@ -2030,7 +2030,7 @@ WHERE user_id IS NOT NULL;
 
 System-wide names are unique. User-scoped names are unique per user. User A and User B can both have a "PETROL" — they do not conflict with each other or with the system version.
 
-System category descriptions follow the format `"System generated - <NAME>"`. For example, the GROCERIES system category has description `"System generated - GROCERIES"`. This is set in the Flyway seed script.
+System categories have human-readable, title-case names and descriptions set in the Flyway seed script (V14). For example, `Groceries` has the description `"Supermarkets and food shopping"` and `Dining` has `"Restaurants, cafes and takeaway"`. Names are matched case-sensitively by the API.
 
 
 **Parent-Child Rule**
@@ -2045,7 +2045,7 @@ When v2.0 introduces promotion, the promotion script will explicitly set the des
 
 **Population in v1.0**
 
-Flyway seeds useful system categories at DB startup — UNCATEGORISED, GROCERIES, DINING, TRANSPORT, UTILITIES, RENT, ENTERTAINMENT, HEALTHCARE, and similar. Same seed runs in both personal and demo deployments.
+Flyway seeds useful system categories at DB startup — Uncategorised, Groceries, Dining, Transport, Utilities, Rent, Health, Entertainment, Shopping, Travel, Education, Insurance, Investments, Gifts, Other (title case). Same seed runs in both personal and demo deployments.
 
 Users create their own categories via the existing `POST /api/v1/categories` endpoint. No promotion mechanism in v1.0 — deferred to v2.0 as an admin operation requiring manual SQL.
 

@@ -30,6 +30,7 @@ docs/
 - [architecture/module-boundaries.md](architecture/module-boundaries.md) — Core, adapters, API, worker — dependency rules and responsibilities
 - [architecture/data-model.md](architecture/data-model.md) — All tables, materialised views, partition registry
 - [architecture/api-contract.md](architecture/api-contract.md) — Every endpoint with sequence diagrams
+- [architecture/testing-strategy.md](architecture/testing-strategy.md) — Test pyramid, the RLS-in-tests patterns, CI, and the bugs the suite caught
 
 ### Decisions
 - [decisions/](decisions/) — One file per non-obvious architectural choice. Numbered sequentially (ADR-0001, ADR-0002, …).

@@ -30,7 +30,7 @@ These apply to every table without restatement.
 
 **Soft deletes.** `deleted_at TIMESTAMPTZ NULL`. NULL means active. Physical deletion never happens. See [ADR-0003](../decisions/0003-soft-delete-only.md).
 
-**Row Level Security.** RLS enabled on every tenant-scoped table. Every query is rewritten by PostgreSQL to add `WHERE user_id = current_setting('app.current_user_id')::uuid`. RESTRICTIVE mode — if the session variable is missing, queries return zero rows.
+**Row Level Security.** RLS enabled on every tenant-scoped table. Every query is rewritten by PostgreSQL to add `WHERE user_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid`. The policies are **PERMISSIVE** (a single per-user `USING`/`WITH CHECK` clause grants the owner their rows); the `TRUE` + `NULLIF(…, '')` make a missing **or** empty session variable resolve to `NULL`, so queries return zero rows — fail-closed. (The v2.0 tables were briefly `RESTRICTIVE` — which with no permissive policy is default-deny — and lacked the empty-string guard; corrected in V34 and V32. See [ADR-0011](../decisions/0011-three-layer-rls-defence.md).)
 
 ---
 
@@ -90,7 +90,7 @@ Indexes:
 - `idx_refresh_tokens_user_active` — partial on `(user_id)` `WHERE revoked_at IS NULL`; used by chain-revocation lookups on reuse detection
 - `idx_refresh_tokens_expires_at` — used by the nightly cleanup job
 
-**RLS.** Standard RESTRICTIVE policy keyed on `user_id = current_setting('app.current_user_id')::uuid`. Login/refresh/logout run on the **setup pool**, which bypasses RLS for this pre-auth path (the token-hash lookup precedes any `UserPrincipal`). V21 created the table with `FORCE ROW LEVEL SECURITY`; **V31 drops `FORCE`** because under the Option-A pivot the setup pool bypasses RLS via table ownership, and owner-bypass — unlike the v2.0 BYPASSRLS role — does not apply to FORCE'd tables (see [ADR-0011](../decisions/0011-three-layer-rls-defence.md)). RLS stays enabled; the non-owner `expense_app` role is still fully isolated here.
+**RLS.** Standard PERMISSIVE policy keyed on `user_id` (fail-closed `NULLIF` form — see the global RLS note above; `RESTRICTIVE`-then-permissive history in V34/V32). Login/refresh/logout run on the **setup pool**, which bypasses RLS for this pre-auth path (the token-hash lookup precedes any `UserPrincipal`). V21 created the table with `FORCE ROW LEVEL SECURITY`; **V31 drops `FORCE`** because under the Option-A pivot the setup pool bypasses RLS via table ownership, and owner-bypass — unlike the v2.0 BYPASSRLS role — does not apply to FORCE'd tables (see [ADR-0011](../decisions/0011-three-layer-rls-defence.md)). RLS stays enabled; the non-owner `expense_app` role is still fully isolated here.
 
 **Lifecycle.** Login creates the first row (`rotated_from = NULL`). Each `/refresh` request marks the presented row as revoked with `revoke_reason = ROTATED` and inserts a new row with `rotated_from = <previous hash>` and the same `session_started_at` (so `expires_at` cannot extend past the original login + 7 days). Logout sets `revoke_reason = LOGOUT`. Presenting a token whose `revoked_at IS NOT NULL` triggers reuse detection: every active row for that `user_id` is revoked with `revoke_reason = REUSE_DETECTED`, forcing full re-authentication.
 
@@ -117,14 +117,18 @@ Plus the standard four audit columns (`created_at`, `updated_at`, `created_by`, 
 - `chk_no_self_grant` — `grantor_id <> grantee_id`. DB-enforced; service layer rejects earlier with a friendlier error.
 - `chk_expires_in_future` — `expires_at > created_at`. Backstop against clock skew at insert.
 
-**RLS policy — dual-clause.** Unlike every other tenant-scoped table, `access_grants` has two user references. The policy matches if the current user is *either* role:
+**RLS policy — dual-clause.** Unlike every other tenant-scoped table, `access_grants` has two user references. The PERMISSIVE policy (V34; the original `RESTRICTIVE` form was default-deny) matches if the current user is *either* role:
 
 ```sql
-USING (grantor_id = current_setting('app.current_user_id')::uuid
-    OR grantee_id = current_setting('app.current_user_id')::uuid)
+USING      (grantor_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid
+        OR  grantee_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid)
+WITH CHECK (grantor_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid
+        OR  grantee_id = NULLIF(current_setting('app.current_user_id', TRUE), '')::uuid)
 ```
 
-This is what lets the grantee list grants given *to* them. The USING clause also acts as `WITH CHECK` on INSERT, bounding creates to grants where the current user is party.
+This is what lets the grantee list grants given *to* them, and bounds creates to grants where the current user is party.
+
+**Cross-user lookups (V33).** Creating a grant must resolve the *grantee* (another user) by username, and listing grants must label the counterparty — both blocked by the own-row `users` policy. They go through the `find_discoverable_user(username)` and `username_of(id)` `SECURITY DEFINER` functions, which run as the table owner, bypass RLS, and return only id/username. See [ADR-0011 "Controlled cross-user reads"](../decisions/0011-three-layer-rls-defence.md).
 
 **Indexes:**
 - `idx_access_grants_grantor_active` — partial on `(grantor_id) WHERE revoked_at IS NULL`. Used by "my active grants given."
