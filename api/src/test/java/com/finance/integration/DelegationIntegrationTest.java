@@ -155,7 +155,7 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
                 new HttpEntity<>(expense, h),
                 Map.class);
 
-        assertThat(r.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat("status=" + r.getStatusCode() + " body=" + r.getBody()).as("DIAG").isEqualTo("SHOW_ME");
 
         // Verify the row landed under Alice's user_id with Bob as the actor.
         Map<String, Object> row = setupJdbc().queryForMap(
