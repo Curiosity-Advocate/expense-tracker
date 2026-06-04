@@ -92,24 +92,6 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantee = registerDiscoverable("bob");
 
         runAs(grantor, () -> {
-            String result;
-            try {
-                entityManager.createNativeQuery(
-                        "INSERT INTO access_grants (id, grantor_id, grantee_id, access_level, expires_at) "
-                        + "VALUES (:id, :gr, :ge, 'READ_WRITE', now() + interval '7 days')")
-                        .setParameter("id", UUID.randomUUID())
-                        .setParameter("gr", grantor)
-                        .setParameter("ge", grantee)
-                        .executeUpdate();
-                result = "EM_INSERT_OK";
-            } catch (Exception e) {
-                Throwable root = e;
-                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
-                String sqlState = (root instanceof java.sql.SQLException se) ? se.getSQLState() : "?";
-                result = "EM_FAIL state=" + sqlState + " msg=" + String.valueOf(root.getMessage()).replaceAll("\\s+", " ");
-            }
-            assertThat(result).as("DIAG").isEqualTo("SHOW_ME");
-
             AccessGrant g = accessGrantService.create(
                     new CreateAccessGrantCommand(grantor, "bob", READ_WRITE, 7));
 
