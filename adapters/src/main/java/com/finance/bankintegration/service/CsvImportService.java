@@ -1,5 +1,6 @@
 package com.finance.bankintegration.service;
 
+import org.springframework.transaction.annotation.Transactional;
 import com.finance.bankintegration.CsvBankParser;
 import com.finance.bankintegration.CsvImportProcessor;
 import com.finance.bankintegration.CsvImportStatusView;
@@ -49,12 +50,13 @@ public class CsvImportService {
         this.clock       = clock;
     }
 
-    // Upload entry point. Each step does its own auto-managed transaction
-    // (no class-level @Transactional). Reasons:
-    //  1. We want the csv_imports INSERT to commit BEFORE we kick off the
-    //     async processor, so the async thread always finds the row.
-    //  2. Atomicity between rate-limit check and INSERT isn't required at
-    //     personal scale (a parallel-upload race would deduplicate later).
+    // Upload entry point. @Transactional so RlsSessionAspect sets
+    // app.current_user_id for the connection lookup, rate-limit check and the
+    // csv_imports INSERT (all RLS-scoped). The async processor is kicked off in
+    // an afterCommit callback so the row is committed and visible before the
+    // async thread reads it — the property the previous no-@Transactional design
+    // was trying to get, but which also left every query without an RLS context.
+    @Transactional
     public CsvImportSubmissionResult upload(UUID bankAccountId,
                                              byte[] csvBytes,
                                              LocalDate exportedOnDate,
@@ -92,10 +94,16 @@ public class CsvImportService {
             throw new CsvImportRateLimitedException(clock.instant().plusSeconds(60));
         }
 
-        processor.kickoff(saved.getId());
+        UUID importId = saved.getId();
+        // Defer the async kickoff until this transaction commits, so the async
+        // thread is guaranteed to see the PENDING row.
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { processor.kickoff(importId); }
+                });
 
         return new CsvImportSubmissionResult(
-                saved.getId(),
+                importId,
                 saved.getParserVersionTag(),
                 saved.getExportedOnDate(),
                 saved.getSubmittedAt()
@@ -105,6 +113,7 @@ public class CsvImportService {
     // Status read. Returns the snapshot of one csv_imports row;
     // CsvImportNotConfiguredException with "import not found" if the id is
     // unknown OR hidden by RLS (indistinguishable to avoid enumeration).
+    @Transactional(readOnly = true)
     public CsvImportStatusView status(UUID importId) {
         return imports.findById(importId)
                 .map(CsvImportService::toView)

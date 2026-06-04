@@ -172,14 +172,17 @@ class SudoTokenIntegrationTest extends IntegrationTestBase {
     @Test
     void create_grantExpired_throwsGrantNotUsable() {
         UUID grantor = register("kate");
-        UUID grantee = registerDiscoverable("liam");
-        UUID grantId = createGrant(grantor, "liam");
+        UUID grantee = register("liam");
 
-        // Backdate the grant's expiry directly via the setup pool (bypasses RLS).
-        // lock_created_at and the audit triggers don't block expires_at updates.
-        Instant longAgo = Instant.now().minus(8, ChronoUnit.DAYS);
-        setupJdbc().update("UPDATE access_grants SET expires_at = ? WHERE id = ?",
-                Timestamp.from(longAgo), grantId);
+        // Insert an already-expired grant directly (setup pool bypasses RLS).
+        // The service won't mint one in the past, and chk_expires_in_future +
+        // lock_created_at forbid backdating via UPDATE — but an INSERT with
+        // created_at < expires_at (both in the past) satisfies the CHECK.
+        UUID grantId = UUID.randomUUID();
+        setupJdbc().update(
+                "INSERT INTO access_grants (id, grantor_id, grantee_id, access_level, created_at, expires_at) "
+                + "VALUES (?, ?, ?, 'READ_WRITE', now() - interval '10 days', now() - interval '1 day')",
+                grantId, grantor, grantee);
 
         assertThatThrownBy(() -> runAs(grantee, () -> sudoTokenService.create(
                 new CreateSudoTokenCommand(grantee, grantId, CORRECT_PW))))

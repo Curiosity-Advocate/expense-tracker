@@ -59,6 +59,7 @@ public class CsvImportConnectionService {
         return connections.save(row);
     }
 
+    @Transactional(readOnly = true)
     public CsvImportConnectionEntity get(UUID bankAccountId) {
         return connections.findById(bankAccountId)
                 .orElseThrow(() -> new CsvImportNotConfiguredException(bankAccountId));
