@@ -43,4 +43,9 @@ dependencies {
     testImplementation 'org.testcontainers:testcontainers:1.19.7'
     testImplementation 'org.testcontainers:postgresql:1.19.7'
     testImplementation 'org.testcontainers:junit-jupiter:1.19.7'
+
+    // TestRestTemplate's default JDK HttpURLConnection rejects PATCH ("Invalid
+    // HTTP method"); Apache HttpClient 5 on the test classpath makes Spring Boot
+    // back TestRestTemplate with it, so PATCH (csv-import-connection update) works.
+    testImplementation 'org.apache.httpcomponents.client5:httpclient5'
 }

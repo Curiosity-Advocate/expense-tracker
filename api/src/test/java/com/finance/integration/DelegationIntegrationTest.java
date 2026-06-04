@@ -146,7 +146,7 @@ class DelegationIntegrationTest extends WebIntegrationTestBase {
                 "expenseDate", LocalDate.now().toString(),
                 "paymentMethod", "CASH",
                 "bankAccountId", aliceCashAccount.toString(),
-                "categories", List.of("UNCATEGORISED"),
+                "categories", List.of("Uncategorised"),
                 "idempotencyKey", UUID.randomUUID().toString());
 
         ResponseEntity<Map> r = http.exchange(
