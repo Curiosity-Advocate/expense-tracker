@@ -92,17 +92,21 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
         UUID grantee = registerDiscoverable("bob");
 
         runAs(grantor, () -> {
-            Object before = entityManager
-                    .createNativeQuery("SELECT current_setting('app.current_user_id', true)")
-                    .getSingleResult();
-            entityManager
-                    .createNativeQuery("SELECT user_id FROM find_discoverable_user('bob')")
-                    .getResultList();
-            Object after = entityManager
-                    .createNativeQuery("SELECT current_setting('app.current_user_id', true)")
-                    .getSingleResult();
-            assertThat("before=[" + before + "] afterFn=[" + after + "] grantor=[" + grantor + "]")
-                    .as("DIAG").isEqualTo("SHOW_ME");
+            String result;
+            try {
+                entityManager.createNativeQuery(
+                        "INSERT INTO access_grants (id, grantor_id, grantee_id, access_level, expires_at) "
+                        + "VALUES (:id, :gr, :ge, 'READ_WRITE', now() + interval '7 days')")
+                        .setParameter("id", UUID.randomUUID())
+                        .setParameter("gr", grantor)
+                        .setParameter("ge", grantee)
+                        .executeUpdate();
+                result = "EM_INSERT_OK";
+            } catch (Exception e) {
+                result = "EM_INSERT_FAIL: " + e.getClass().getSimpleName() + " "
+                        + (e.getMessage() == null ? "" : e.getMessage().replaceAll("\\s+", " ")).substring(0, Math.min(80, e.getMessage() == null ? 0 : e.getMessage().length()));
+            }
+            assertThat(result).as("DIAG").isEqualTo("SHOW_ME");
 
             AccessGrant g = accessGrantService.create(
                     new CreateAccessGrantCommand(grantor, "bob", READ_WRITE, 7));
