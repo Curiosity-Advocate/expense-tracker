@@ -103,8 +103,10 @@ class AccessGrantIntegrationTest extends IntegrationTestBase {
                         .executeUpdate();
                 result = "EM_INSERT_OK";
             } catch (Exception e) {
-                result = "EM_INSERT_FAIL: " + e.getClass().getSimpleName() + " "
-                        + (e.getMessage() == null ? "" : e.getMessage().replaceAll("\\s+", " ")).substring(0, Math.min(80, e.getMessage() == null ? 0 : e.getMessage().length()));
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                String sqlState = (root instanceof java.sql.SQLException se) ? se.getSQLState() : "?";
+                result = "EM_FAIL state=" + sqlState + " msg=" + String.valueOf(root.getMessage()).replaceAll("\\s+", " ");
             }
             assertThat(result).as("DIAG").isEqualTo("SHOW_ME");
 
